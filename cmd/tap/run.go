@@ -46,6 +46,7 @@ const (
 	adminEndpointReplayDLQ     = "replay_dlq"
 	adminEndpointReplayDLQList = "replay_dlq_list"
 	adminEndpointReplayStatus  = "replay_dlq_status"
+	adminEndpointReplayCancel  = "replay_dlq_cancel"
 	adminEndpointPollerStatus  = "poller_status"
 	adminOutcomeSuccess        = "success"
 	adminOutcomeConflict       = "conflict"
@@ -60,6 +61,7 @@ const (
 	adminReplayJobStatusRunning   = "running"
 	adminReplayJobStatusSucceeded = "succeeded"
 	adminReplayJobStatusFailed    = "failed"
+	adminReplayJobStatusCancelled = "cancelled"
 )
 
 func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
@@ -433,7 +435,9 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 					metrics.AdminReplayJobsInFlight.Dec()
 					<-replaySlots
 				}()
-				replayJobs.MarkRunning(jobID)
+				if !replayJobs.MarkRunning(jobID) {
+					return
+				}
 				if dryRun {
 					pending, err := dlqPublisher.Pending()
 					if err != nil {
@@ -535,6 +539,71 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 				"user_agent", access.UserAgent,
 				"job_id", jobID,
 				"status", job.Status,
+				"duration_ms", time.Since(startedAt).Milliseconds(),
+			)
+		})
+		mux.HandleFunc("DELETE /admin/replay-dlq/{job_id}", func(w http.ResponseWriter, r *http.Request) {
+			access, ok := requireAdminAccess(adminEndpointReplayCancel, w, r)
+			if !ok {
+				return
+			}
+			startedAt := time.Now()
+			jobID := strings.TrimSpace(r.PathValue("job_id"))
+			if jobID == "" {
+				observeAdmin(adminEndpointReplayCancel, adminOutcomeBadRequest, startedAt)
+				writeAdminError(w, http.StatusBadRequest, access.RequestID, "job_id is required")
+				return
+			}
+			job, found, cancelled := replayJobs.CancelQueued(jobID)
+			if !found {
+				observeAdmin(adminEndpointReplayCancel, adminOutcomeNotFound, startedAt)
+				logger.Warn("admin replay dlq cancel missing",
+					"path", r.URL.Path,
+					"method", r.Method,
+					"endpoint", adminEndpointReplayCancel,
+					"request_id", access.RequestID,
+					"token_slot", access.TokenSlot,
+					"requester_ip", access.RequestIP,
+					"user_agent", access.UserAgent,
+					"job_id", jobID,
+					"duration_ms", time.Since(startedAt).Milliseconds(),
+				)
+				writeAdminError(w, http.StatusNotFound, access.RequestID, "replay job not found")
+				return
+			}
+			if !cancelled {
+				observeAdmin(adminEndpointReplayCancel, adminOutcomeConflict, startedAt)
+				logger.Warn("admin replay dlq cancel conflict",
+					"path", r.URL.Path,
+					"method", r.Method,
+					"endpoint", adminEndpointReplayCancel,
+					"request_id", access.RequestID,
+					"token_slot", access.TokenSlot,
+					"requester_ip", access.RequestIP,
+					"user_agent", access.UserAgent,
+					"job_id", jobID,
+					"status", job.Status,
+					"duration_ms", time.Since(startedAt).Milliseconds(),
+				)
+				writeAdminError(w, http.StatusConflict, access.RequestID, "replay job cannot be cancelled once running or completed")
+				return
+			}
+			observeReplayJob("cancelled")
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"request_id": access.RequestID,
+				"job":        job,
+			})
+			observeAdmin(adminEndpointReplayCancel, adminOutcomeSuccess, startedAt)
+			logger.Info("admin replay dlq cancelled",
+				"path", r.URL.Path,
+				"method", r.Method,
+				"endpoint", adminEndpointReplayCancel,
+				"request_id", access.RequestID,
+				"token_slot", access.TokenSlot,
+				"requester_ip", access.RequestIP,
+				"user_agent", access.UserAgent,
+				"job_id", jobID,
 				"duration_ms", time.Since(startedAt).Milliseconds(),
 			)
 		})
@@ -666,10 +735,10 @@ func parseReplayJobStatusFilter(raw string) (string, error) {
 		return "", nil
 	}
 	switch filter {
-	case adminReplayJobStatusQueued, adminReplayJobStatusRunning, adminReplayJobStatusSucceeded, adminReplayJobStatusFailed:
+	case adminReplayJobStatusQueued, adminReplayJobStatusRunning, adminReplayJobStatusSucceeded, adminReplayJobStatusFailed, adminReplayJobStatusCancelled:
 		return filter, nil
 	default:
-		return "", fmt.Errorf("invalid status %q: must be one of queued|running|succeeded|failed", strings.TrimSpace(raw))
+		return "", fmt.Errorf("invalid status %q: must be one of queued|running|succeeded|failed|cancelled", strings.TrimSpace(raw))
 	}
 }
 
@@ -1108,6 +1177,7 @@ func (r *adminReplayJobRegistry) List(statusFilter string, limit int, cursorCrea
 		adminReplayJobStatusRunning:   0,
 		adminReplayJobStatusSucceeded: 0,
 		adminReplayJobStatusFailed:    0,
+		adminReplayJobStatusCancelled: 0,
 	}
 	if r == nil {
 		return []adminReplayJobSnapshot{}, summary, ""
@@ -1171,14 +1241,26 @@ func replayJobComesAfterCursor(candidate adminReplayJobSnapshot, cursorCreatedAt
 	return strings.TrimSpace(candidate.JobID) < strings.TrimSpace(cursorJobID)
 }
 
-func (r *adminReplayJobRegistry) MarkRunning(jobID string) {
-	r.update(jobID, func(snapshot *adminReplayJobSnapshot) {
-		if snapshot.Status != adminReplayJobStatusQueued {
-			return
-		}
-		snapshot.Status = adminReplayJobStatusRunning
-		snapshot.StartedAt = time.Now().UTC()
-	})
+func (r *adminReplayJobRegistry) MarkRunning(jobID string) bool {
+	jobID = strings.TrimSpace(jobID)
+	if r == nil || jobID == "" {
+		return false
+	}
+	now := time.Now().UTC()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cleanupLocked(now)
+	job := r.jobs[jobID]
+	if job == nil {
+		return false
+	}
+	if job.snapshot.Status != adminReplayJobStatusQueued {
+		return false
+	}
+	job.snapshot.Status = adminReplayJobStatusRunning
+	job.snapshot.StartedAt = now
+	job.updatedAt = now
+	return true
 }
 
 func (r *adminReplayJobRegistry) MarkSucceeded(jobID string, replayed int) {
@@ -1196,6 +1278,29 @@ func (r *adminReplayJobRegistry) MarkFailed(jobID, message string) {
 		snapshot.CompletedAt = time.Now().UTC()
 		snapshot.Error = strings.TrimSpace(message)
 	})
+}
+
+func (r *adminReplayJobRegistry) CancelQueued(jobID string) (adminReplayJobSnapshot, bool, bool) {
+	jobID = strings.TrimSpace(jobID)
+	if r == nil || jobID == "" {
+		return adminReplayJobSnapshot{}, false, false
+	}
+	now := time.Now().UTC()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cleanupLocked(now)
+	job := r.jobs[jobID]
+	if job == nil {
+		return adminReplayJobSnapshot{}, false, false
+	}
+	if job.snapshot.Status != adminReplayJobStatusQueued {
+		return job.snapshot, true, false
+	}
+	job.snapshot.Status = adminReplayJobStatusCancelled
+	job.snapshot.CompletedAt = now
+	job.snapshot.Error = "cancelled by operator"
+	job.updatedAt = now
+	return job.snapshot, true, true
 }
 
 func (r *adminReplayJobRegistry) update(jobID string, mutate func(snapshot *adminReplayJobSnapshot)) {

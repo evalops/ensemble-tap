@@ -18,6 +18,7 @@ Ensemble Tap is a standalone Go service that ingests SaaS webhook events, normal
   - `GET /admin/replay-dlq` lists replay jobs with optional `status` and `limit` filters.
   - `POST /admin/replay-dlq?limit=100` creates async replay jobs (with `dry_run` and idempotency support).
   - `GET /admin/replay-dlq/{job_id}` fetches replay job status/results.
+  - `DELETE /admin/replay-dlq/{job_id}` cancels queued replay jobs.
 - Admin poller runtime status endpoint: `GET /admin/poller-status` guarded by `X-Admin-Token`, with optional `provider` and `tenant` filters.
 - Health and observability endpoints:
   - `GET /livez`
@@ -77,11 +78,14 @@ When `server.admin_token` is set, these endpoints are available:
   - Replay execution is configurable (`server.admin_replay_job_timeout`, `server.admin_replay_max_concurrent_jobs`) for bounded runtime and concurrency.
 - `GET /admin/replay-dlq`
   - Requires header `X-Admin-Token`.
-  - Optional query params: `status` (`queued|running|succeeded|failed`), `limit` (max `500`, default `50`), and `cursor` (from prior `next_cursor`).
+  - Optional query params: `status` (`queued|running|succeeded|failed|cancelled`), `limit` (max `500`, default `50`), and `cursor` (from prior `next_cursor`).
   - Returns replay job list plus per-status summary counts and pagination cursors for queue introspection.
 - `GET /admin/replay-dlq/{job_id}`
   - Requires header `X-Admin-Token`.
-  - Returns current replay job state (`queued`, `running`, `succeeded`, `failed`) and result fields (`replayed`, `error`).
+  - Returns current replay job state (`queued`, `running`, `succeeded`, `failed`, `cancelled`) and result fields (`replayed`, `error`).
+- `DELETE /admin/replay-dlq/{job_id}`
+  - Requires header `X-Admin-Token`.
+  - Cancels replay jobs that are still `queued`; returns `409` if the job is already `running` or completed.
 - `GET /admin/poller-status`
   - Requires header `X-Admin-Token`.
   - Supports token rotation with `server.admin_token_secondary`.
@@ -124,6 +128,11 @@ curl -i 'http://localhost:8080/admin/replay-dlq?status=succeeded&limit=20&cursor
 curl -i 'http://localhost:8080/admin/replay-dlq/replay_1234567890_1' \
   -H 'X-Admin-Token: your-admin-token' \
   -H 'X-Request-ID: replay-status-001'
+
+# Cancel queued replay job
+curl -i -X DELETE 'http://localhost:8080/admin/replay-dlq/replay_1234567890_1' \
+  -H 'X-Admin-Token: your-admin-token' \
+  -H 'X-Request-ID: replay-cancel-001'
 
 # Poller status (filtered)
 curl -i 'http://localhost:8080/admin/poller-status?provider=hubspot&tenant=tenant-a' \

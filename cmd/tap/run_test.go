@@ -285,6 +285,7 @@ func TestParseReplayJobStatusFilter(t *testing.T) {
 		{name: "empty all", raw: "", want: ""},
 		{name: "queued", raw: "queued", want: adminReplayJobStatusQueued},
 		{name: "running uppercase", raw: "RUNNING", want: adminReplayJobStatusRunning},
+		{name: "cancelled", raw: "cancelled", want: adminReplayJobStatusCancelled},
 		{name: "invalid", raw: "done", wantErr: true, wantErrSub: "invalid status"},
 	}
 	for _, tt := range tests {
@@ -569,6 +570,43 @@ func TestAdminReplayJobRegistryList(t *testing.T) {
 	}
 	if secondNextCursor != "" {
 		t.Fatalf("expected no further cursor on second page, got %q", secondNextCursor)
+	}
+}
+
+func TestAdminReplayJobRegistryCancelQueued(t *testing.T) {
+	registry := newAdminReplayJobRegistry(128, time.Hour)
+	base := adminReplayJobSnapshot{
+		RequestedLimit: 2,
+		EffectiveLimit: 2,
+		MaxLimit:       2000,
+	}
+	queued, _, _ := registry.GetOrCreate(base, "idem-cancel-queued")
+	cancelledJob, found, cancelled := registry.CancelQueued(queued.JobID)
+	if !found || !cancelled {
+		t.Fatalf("expected queued replay job cancellation to succeed, found=%v cancelled=%v", found, cancelled)
+	}
+	if cancelledJob.Status != adminReplayJobStatusCancelled || !strings.Contains(cancelledJob.Error, "cancelled") {
+		t.Fatalf("unexpected cancelled replay job snapshot: %+v", cancelledJob)
+	}
+	if registry.MarkRunning(queued.JobID) {
+		t.Fatalf("expected cancelled replay job to not transition to running")
+	}
+
+	running, _, _ := registry.GetOrCreate(base, "idem-cancel-running")
+	if !registry.MarkRunning(running.JobID) {
+		t.Fatalf("expected running replay job transition")
+	}
+	runningJob, found, cancelled := registry.CancelQueued(running.JobID)
+	if !found || cancelled {
+		t.Fatalf("expected running replay job cancel attempt to conflict, found=%v cancelled=%v", found, cancelled)
+	}
+	if runningJob.Status != adminReplayJobStatusRunning {
+		t.Fatalf("expected running replay job status to remain running, got %+v", runningJob)
+	}
+
+	_, found, cancelled = registry.CancelQueued("missing-job-id")
+	if found || cancelled {
+		t.Fatalf("expected missing replay job cancellation to report not found")
 	}
 }
 
@@ -982,6 +1020,38 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 		t.Fatalf("unexpected dry-run replay job completion: %+v", dryRunFinished)
 	}
 
+	reqCancelCompleted, _ := http.NewRequest(http.MethodDelete, replayBaseURL+"/"+dryRunAccepted.Job.JobID, nil)
+	reqCancelCompleted.Header.Set("X-Admin-Token", "test-admin-token")
+	reqCancelCompleted.Header.Set("X-Request-ID", "replay-cancel-completed-1")
+	respCancelCompleted, err := http.DefaultClient.Do(reqCancelCompleted)
+	if err != nil {
+		t.Fatalf("request replay cancel completed job: %v", err)
+	}
+	if respCancelCompleted.StatusCode != http.StatusConflict {
+		_ = respCancelCompleted.Body.Close()
+		t.Fatalf("expected 409 for completed replay cancel, got %d", respCancelCompleted.StatusCode)
+	}
+	cancelCompletedErr := readAdminError(respCancelCompleted)
+	if cancelCompletedErr.RequestID != "replay-cancel-completed-1" || !strings.Contains(cancelCompletedErr.Error, "cannot be cancelled") {
+		t.Fatalf("unexpected replay cancel completed payload: %+v", cancelCompletedErr)
+	}
+
+	reqCancelMissing, _ := http.NewRequest(http.MethodDelete, replayBaseURL+"/missing-cancel-job", nil)
+	reqCancelMissing.Header.Set("X-Admin-Token", "test-admin-token")
+	reqCancelMissing.Header.Set("X-Request-ID", "replay-cancel-missing-1")
+	respCancelMissing, err := http.DefaultClient.Do(reqCancelMissing)
+	if err != nil {
+		t.Fatalf("request replay cancel missing job: %v", err)
+	}
+	if respCancelMissing.StatusCode != http.StatusNotFound {
+		_ = respCancelMissing.Body.Close()
+		t.Fatalf("expected 404 for missing replay cancel, got %d", respCancelMissing.StatusCode)
+	}
+	cancelMissingErr := readAdminError(respCancelMissing)
+	if cancelMissingErr.RequestID != "replay-cancel-missing-1" || !strings.Contains(cancelMissingErr.Error, "not found") {
+		t.Fatalf("unexpected replay cancel missing payload: %+v", cancelMissingErr)
+	}
+
 	reqListInvalid, _ := http.NewRequest(http.MethodGet, replayBaseURL+"?status=unknown", nil)
 	reqListInvalid.Header.Set("X-Admin-Token", "test-admin-token")
 	reqListInvalid.Header.Set("X-Request-ID", "replay-list-invalid-1")
@@ -1246,6 +1316,14 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 	assertMetricAtLeast(t, metricsText, "tap_admin_requests_total", map[string]string{
 		"endpoint": adminEndpointReplayDLQList,
 		"outcome":  adminOutcomeSuccess,
+	}, 1)
+	assertMetricAtLeast(t, metricsText, "tap_admin_requests_total", map[string]string{
+		"endpoint": adminEndpointReplayCancel,
+		"outcome":  adminOutcomeConflict,
+	}, 1)
+	assertMetricAtLeast(t, metricsText, "tap_admin_requests_total", map[string]string{
+		"endpoint": adminEndpointReplayCancel,
+		"outcome":  adminOutcomeNotFound,
 	}, 1)
 	assertMetricAtLeast(t, metricsText, "tap_admin_request_duration_seconds_count", map[string]string{
 		"endpoint": adminEndpointReplayDLQ,

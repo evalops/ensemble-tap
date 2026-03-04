@@ -156,6 +156,11 @@ func TestAdminOpenAPIContractMatchesRuntime(t *testing.T) {
 	statusReq.Header.Set("X-Request-ID", "openapi-status-1")
 	_, _ = validateRoundTrip(statusReq, http.StatusOK)
 
+	cancelReq, _ := http.NewRequest(http.MethodDelete, "http://127.0.0.1:"+intToString(port)+"/admin/replay-dlq/missing-job-id", nil)
+	cancelReq.Header.Set("X-Admin-Token", "test-admin-token")
+	cancelReq.Header.Set("X-Request-ID", "openapi-cancel-1")
+	_, _ = validateRoundTrip(cancelReq, http.StatusNotFound)
+
 	pollerReq, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+intToString(port)+"/admin/poller-status?provider=notion", nil)
 	pollerReq.Header.Set("X-Admin-Token", "test-admin-token")
 	pollerReq.Header.Set("X-Request-ID", "openapi-poller-1")
