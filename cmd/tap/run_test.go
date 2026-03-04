@@ -235,6 +235,25 @@ func TestParseReplayDLQLimit(t *testing.T) {
 	}
 }
 
+func TestAdminRetryAfterSeconds(t *testing.T) {
+	tests := []struct {
+		limit float64
+		want  int
+	}{
+		{limit: 0, want: 1},
+		{limit: 5, want: 1},
+		{limit: 1, want: 1},
+		{limit: 0.5, want: 2},
+		{limit: 0.1, want: 10},
+	}
+	for _, tt := range tests {
+		got := adminRetryAfterSeconds(tt.limit)
+		if got != tt.want {
+			t.Fatalf("adminRetryAfterSeconds(%v): want %d, got %d", tt.limit, tt.want, got)
+		}
+	}
+}
+
 func TestRequesterIP(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/admin/poller-status", nil)
 	req.RemoteAddr = "127.0.0.1:12345"
@@ -908,6 +927,182 @@ func TestRunAdminPollerStatusEndpoint(t *testing.T) {
 		"endpoint": adminEndpointPollerStatus,
 		"outcome":  adminOutcomeSuccess,
 	}, 1)
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("run returned error: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("run did not stop after cancel")
+	}
+}
+
+func TestRunAdminEndpointsRateLimited(t *testing.T) {
+	s := runNATSServer(t)
+	port := freePort(t)
+
+	cfg := config.Config{
+		NATS: config.NATSConfig{
+			URL:           s.ClientURL(),
+			Stream:        "ENSEMBLE_TAP_CMD_TEST_ADMIN_RATELIMIT",
+			SubjectPrefix: "ensemble.tap",
+			MaxAge:        time.Hour,
+			DedupWindow:   time.Minute,
+		},
+		Server: config.ServerConfig{
+			Port:                 port,
+			BasePath:             "/webhooks",
+			MaxBodySize:          1 << 20,
+			AdminToken:           "test-admin-token",
+			AdminRateLimitPerSec: 0.1,
+			AdminRateLimitBurst:  1,
+		},
+	}
+	cfg.ApplyDefaults()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var logBuf bytes.Buffer
+	testLogger := slog.New(slog.NewJSONHandler(&logBuf, nil))
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- run(ctx, cfg, testLogger)
+	}()
+
+	readyURL := "http://127.0.0.1:" + intToString(port) + "/readyz"
+	if err := waitForStatusOrError(readyURL, http.StatusOK, 10*time.Second, errCh); err != nil {
+		t.Fatalf("ready endpoint never became healthy: %v", err)
+	}
+
+	type adminErrorResponse struct {
+		RequestID string `json:"request_id"`
+		Error     string `json:"error"`
+	}
+	readAdminError := func(resp *http.Response) adminErrorResponse {
+		t.Helper()
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			t.Fatalf("read admin error response body: %v", err)
+		}
+		var out adminErrorResponse
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatalf("decode admin error response body: %v body=%s", err, string(body))
+		}
+		return out
+	}
+
+	replayURL := "http://127.0.0.1:" + intToString(port) + "/admin/replay-dlq"
+	reqReplayUnauth, _ := http.NewRequest(http.MethodPost, replayURL, nil)
+	reqReplayUnauth.Header.Set("X-Request-ID", "rate-replay-1")
+	reqReplayUnauth.Header.Set("X-Forwarded-For", "203.0.113.71")
+	respReplayUnauth, err := http.DefaultClient.Do(reqReplayUnauth)
+	if err != nil {
+		t.Fatalf("request replay unauthorized baseline: %v", err)
+	}
+	if respReplayUnauth.StatusCode != http.StatusUnauthorized {
+		_ = respReplayUnauth.Body.Close()
+		t.Fatalf("expected replay baseline status 401, got %d", respReplayUnauth.StatusCode)
+	}
+	unauthErr := readAdminError(respReplayUnauth)
+	if unauthErr.RequestID != "rate-replay-1" || unauthErr.Error != "unauthorized" {
+		t.Fatalf("unexpected replay baseline error payload: %+v", unauthErr)
+	}
+
+	reqReplayLimited, _ := http.NewRequest(http.MethodPost, replayURL, nil)
+	reqReplayLimited.Header.Set("X-Request-ID", "rate-replay-2")
+	reqReplayLimited.Header.Set("X-Forwarded-For", "203.0.113.72")
+	respReplayLimited, err := http.DefaultClient.Do(reqReplayLimited)
+	if err != nil {
+		t.Fatalf("request replay expected rate-limit: %v", err)
+	}
+	if respReplayLimited.StatusCode != http.StatusTooManyRequests {
+		_ = respReplayLimited.Body.Close()
+		t.Fatalf("expected replay rate-limited status 429, got %d", respReplayLimited.StatusCode)
+	}
+	if got := strings.TrimSpace(respReplayLimited.Header.Get("Retry-After")); got != "10" {
+		_ = respReplayLimited.Body.Close()
+		t.Fatalf("expected replay Retry-After=10, got %q", got)
+	}
+	replayLimitedErr := readAdminError(respReplayLimited)
+	if replayLimitedErr.RequestID != "rate-replay-2" || replayLimitedErr.Error != "rate limit exceeded" {
+		t.Fatalf("unexpected replay rate-limit payload: %+v", replayLimitedErr)
+	}
+
+	statusURL := "http://127.0.0.1:" + intToString(port) + "/admin/poller-status"
+	reqStatusOK, _ := http.NewRequest(http.MethodGet, statusURL, nil)
+	reqStatusOK.Header.Set("X-Admin-Token", "test-admin-token")
+	reqStatusOK.Header.Set("X-Request-ID", "rate-status-1")
+	reqStatusOK.Header.Set("X-Forwarded-For", "203.0.113.73")
+	respStatusOK, err := http.DefaultClient.Do(reqStatusOK)
+	if err != nil {
+		t.Fatalf("request status baseline: %v", err)
+	}
+	if respStatusOK.StatusCode != http.StatusOK {
+		_ = respStatusOK.Body.Close()
+		t.Fatalf("expected status baseline 200, got %d", respStatusOK.StatusCode)
+	}
+	_, _ = io.Copy(io.Discard, respStatusOK.Body)
+	_ = respStatusOK.Body.Close()
+
+	reqStatusLimited, _ := http.NewRequest(http.MethodGet, statusURL, nil)
+	reqStatusLimited.Header.Set("X-Admin-Token", "test-admin-token")
+	reqStatusLimited.Header.Set("X-Request-ID", "rate-status-2")
+	reqStatusLimited.Header.Set("X-Forwarded-For", "203.0.113.74")
+	respStatusLimited, err := http.DefaultClient.Do(reqStatusLimited)
+	if err != nil {
+		t.Fatalf("request status expected rate-limit: %v", err)
+	}
+	if respStatusLimited.StatusCode != http.StatusTooManyRequests {
+		_ = respStatusLimited.Body.Close()
+		t.Fatalf("expected status rate-limited 429, got %d", respStatusLimited.StatusCode)
+	}
+	if got := strings.TrimSpace(respStatusLimited.Header.Get("Retry-After")); got != "10" {
+		_ = respStatusLimited.Body.Close()
+		t.Fatalf("expected status Retry-After=10, got %q", got)
+	}
+	statusLimitedErr := readAdminError(respStatusLimited)
+	if statusLimitedErr.RequestID != "rate-status-2" || statusLimitedErr.Error != "rate limit exceeded" {
+		t.Fatalf("unexpected status rate-limit payload: %+v", statusLimitedErr)
+	}
+
+	metricsText := fetchMetricsBody(t, "http://127.0.0.1:"+intToString(port)+"/metrics")
+	assertMetricAtLeast(t, metricsText, "tap_admin_requests_total", map[string]string{
+		"endpoint": adminEndpointReplayDLQ,
+		"outcome":  adminOutcomeRateLimited,
+	}, 1)
+	assertMetricAtLeast(t, metricsText, "tap_admin_requests_total", map[string]string{
+		"endpoint": adminEndpointPollerStatus,
+		"outcome":  adminOutcomeRateLimited,
+	}, 1)
+
+	logEntries := parseJSONLogEntries(t, logBuf.String())
+	if _, ok := findLogEntry(logEntries, "admin request rate limited", func(entry map[string]any) bool {
+		endpoint, okEndpoint := entry["endpoint"].(string)
+		requestID, okRequestID := entry["request_id"].(string)
+		retryAfter, okRetryAfter := logFieldInt(entry, "retry_after_seconds")
+		return okEndpoint && okRequestID && okRetryAfter &&
+			endpoint == adminEndpointReplayDLQ &&
+			requestID == "rate-replay-2" &&
+			retryAfter == 10
+	}); !ok {
+		t.Fatalf("expected replay rate-limited audit log; logs=%s", logBuf.String())
+	}
+	if _, ok := findLogEntry(logEntries, "admin request rate limited", func(entry map[string]any) bool {
+		endpoint, okEndpoint := entry["endpoint"].(string)
+		requestID, okRequestID := entry["request_id"].(string)
+		retryAfter, okRetryAfter := logFieldInt(entry, "retry_after_seconds")
+		return okEndpoint && okRequestID && okRetryAfter &&
+			endpoint == adminEndpointPollerStatus &&
+			requestID == "rate-status-2" &&
+			retryAfter == 10
+	}); !ok {
+		t.Fatalf("expected status rate-limited audit log; logs=%s", logBuf.String())
+	}
 
 	cancel()
 	select {

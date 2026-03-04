@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"sort"
@@ -42,6 +43,7 @@ const (
 	adminEndpointPollerStatus = "poller_status"
 	adminOutcomeSuccess       = "success"
 	adminOutcomeUnauthorized  = "unauthorized"
+	adminOutcomeRateLimited   = "rate_limited"
 	adminOutcomeBadRequest    = "bad_request"
 	adminOutcomeInternalError = "error"
 )
@@ -108,6 +110,19 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		if adminReplayMaxLimit <= 0 {
 			adminReplayMaxLimit = maxReplayDLQLimit
 		}
+		adminRateLimitPerSec := cfg.Server.AdminRateLimitPerSec
+		if adminRateLimitPerSec <= 0 {
+			adminRateLimitPerSec = 1
+		}
+		adminRateLimitBurst := cfg.Server.AdminRateLimitBurst
+		if adminRateLimitBurst <= 0 {
+			adminRateLimitBurst = 1
+		}
+		retryAfterSeconds := adminRetryAfterSeconds(adminRateLimitPerSec)
+		adminLimiters := map[string]*rate.Limiter{
+			adminEndpointReplayDLQ:    rate.NewLimiter(rate.Limit(adminRateLimitPerSec), adminRateLimitBurst),
+			adminEndpointPollerStatus: rate.NewLimiter(rate.Limit(adminRateLimitPerSec), adminRateLimitBurst),
+		}
 		observeAdmin := func(endpoint, outcome string, startedAt time.Time) {
 			metrics.AdminRequestsTotal.WithLabelValues(endpoint, outcome).Inc()
 			metrics.AdminRequestDurationSeconds.WithLabelValues(endpoint, outcome).Observe(time.Since(startedAt).Seconds())
@@ -118,6 +133,22 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			requestIP := requesterIP(r)
 			w.Header().Set("X-Request-ID", reqID)
 			startedAt := time.Now()
+			if limiter, ok := adminLimiters[endpoint]; ok && !limiter.Allow() {
+				observeAdmin(endpoint, adminOutcomeRateLimited, startedAt)
+				w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
+				logger.Warn("admin request rate limited",
+					"path", r.URL.Path,
+					"method", r.Method,
+					"endpoint", endpoint,
+					"request_id", reqID,
+					"requester_ip", requestIP,
+					"user_agent", userAgent,
+					"retry_after_seconds", retryAfterSeconds,
+					"duration_ms", time.Since(startedAt).Milliseconds(),
+				)
+				writeAdminError(w, http.StatusTooManyRequests, reqID, "rate limit exceeded")
+				return reqID, "", false
+			}
 			authorized, tokenSlot := authorizeAdminToken(strings.TrimSpace(r.Header.Get("X-Admin-Token")), adminToken, adminTokenSecondary)
 			if !authorized {
 				observeAdmin(endpoint, adminOutcomeUnauthorized, startedAt)
@@ -316,6 +347,17 @@ func parseReplayDLQLimit(raw string, maxLimit int) (requested int, effective int
 		capped = true
 	}
 	return requested, effective, capped, nil
+}
+
+func adminRetryAfterSeconds(limitPerSec float64) int {
+	if limitPerSec <= 0 {
+		return 1
+	}
+	retry := int(math.Ceil(1 / limitPerSec))
+	if retry < 1 {
+		return 1
+	}
+	return retry
 }
 
 func authorizeAdminToken(actual, primary, secondary string) (authorized bool, tokenSlot string) {

@@ -68,6 +68,12 @@ func TestLoadConfigMissingFileAppliesDefaults(t *testing.T) {
 	if cfg.Server.AdminReplayMaxLimit != 2000 {
 		t.Fatalf("expected default admin replay max limit 2000, got %d", cfg.Server.AdminReplayMaxLimit)
 	}
+	if cfg.Server.AdminRateLimitPerSec != 5.0 {
+		t.Fatalf("expected default admin rate limit per sec 5.0, got %v", cfg.Server.AdminRateLimitPerSec)
+	}
+	if cfg.Server.AdminRateLimitBurst != 20 {
+		t.Fatalf("expected default admin rate limit burst 20, got %d", cfg.Server.AdminRateLimitBurst)
+	}
 }
 
 func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
@@ -76,6 +82,8 @@ func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
 	t.Setenv("TAP_NATS_SUBJECT_PREFIX", "ensemble.tap.custom")
 	t.Setenv("TAP_SERVER_MAX_BODY_SIZE", "2097152")
 	t.Setenv("TAP_SERVER_ADMIN_REPLAY_MAX_LIMIT", "1234")
+	t.Setenv("TAP_SERVER_ADMIN_RATE_LIMIT_PER_SEC", "2.5")
+	t.Setenv("TAP_SERVER_ADMIN_RATE_LIMIT_BURST", "9")
 	t.Setenv("TAP_SERVER_ADMIN_TOKEN", "current-admin-token")
 	t.Setenv("TAP_SERVER_ADMIN_TOKEN_SECONDARY", "next-admin-token")
 	t.Setenv("TAP_CLICKHOUSE_FLUSH_INTERVAL", "3s")
@@ -95,6 +103,12 @@ func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
 	}
 	if cfg.Server.AdminReplayMaxLimit != 1234 {
 		t.Fatalf("expected server.admin_replay_max_limit override, got %d", cfg.Server.AdminReplayMaxLimit)
+	}
+	if cfg.Server.AdminRateLimitPerSec != 2.5 {
+		t.Fatalf("expected server.admin_rate_limit_per_sec override, got %v", cfg.Server.AdminRateLimitPerSec)
+	}
+	if cfg.Server.AdminRateLimitBurst != 9 {
+		t.Fatalf("expected server.admin_rate_limit_burst override, got %d", cfg.Server.AdminRateLimitBurst)
 	}
 	if cfg.Server.AdminToken != "current-admin-token" {
 		t.Fatalf("expected server.admin_token override")
@@ -157,12 +171,32 @@ func TestConfigValidateAdminTokenAndReplayRules(t *testing.T) {
 			wantErrSub: "must be in range",
 		},
 		{
+			name: "admin rate limit per sec must be positive",
+			cfg: Config{
+				Server: ServerConfig{
+					AdminRateLimitPerSec: -1,
+				},
+			},
+			wantErrSub: "admin_rate_limit_per_sec",
+		},
+		{
+			name: "admin rate limit burst must be positive",
+			cfg: Config{
+				Server: ServerConfig{
+					AdminRateLimitBurst: -1,
+				},
+			},
+			wantErrSub: "admin_rate_limit_burst",
+		},
+		{
 			name: "valid token rotation and replay max",
 			cfg: Config{
 				Server: ServerConfig{
-					AdminToken:          "primary-token",
-					AdminTokenSecondary: "next-token",
-					AdminReplayMaxLimit: 5000,
+					AdminToken:           "primary-token",
+					AdminTokenSecondary:  "next-token",
+					AdminReplayMaxLimit:  5000,
+					AdminRateLimitPerSec: 3.5,
+					AdminRateLimitBurst:  11,
 				},
 			},
 		},

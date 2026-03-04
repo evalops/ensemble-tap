@@ -64,6 +64,7 @@ When `server.admin_token` is set, these endpoints are available:
   - Supports token rotation with `server.admin_token_secondary` (either primary or secondary token is accepted). `admin_token_secondary` requires `admin_token`, and both values must differ.
   - Optional header `X-Request-ID` (echoed back in `X-Request-ID` response header and `request_id` body field).
   - Error responses are JSON (`{"request_id":"...","error":"..."}`) for consistent automation and audit correlation.
+  - Admin endpoints are token-bucket rate-limited (`server.admin_rate_limit_per_sec`, `server.admin_rate_limit_burst`) and return `429` with `Retry-After`.
   - `limit` must be a positive integer.
   - Replay is capped by `server.admin_replay_max_limit` (default `2000`, valid range `1..100000`); response includes `requested_limit`, `effective_limit`, `max_limit`, and `capped`. If `limit` is omitted, default replay (`100`) is still capped by `admin_replay_max_limit`.
 - `GET /admin/poller-status`
@@ -75,6 +76,25 @@ When `server.admin_token` is set, these endpoints are available:
   - Response includes `count` and per-poller runtime fields (`interval`, rate limiter values, failure budget, circuit-break duration, jitter ratio, last run/success/error details).
   - Structured audit logs are emitted for authorized and unauthorized admin calls (`request_id`, requester IP, user-agent, path/method, and duration).
   - Prometheus metrics include `tap_admin_requests_total{endpoint,outcome}` and `tap_admin_request_duration_seconds{endpoint,outcome}`.
+
+## Admin API Contract
+
+- OpenAPI contract: `docs/admin-openapi.yaml`
+
+```bash
+# Replay DLQ with explicit request id
+curl -i -X POST 'http://localhost:8080/admin/replay-dlq?limit=50' \
+  -H 'X-Admin-Token: your-admin-token' \
+  -H 'X-Request-ID: replay-manual-001'
+
+# Poller status (filtered)
+curl -i 'http://localhost:8080/admin/poller-status?provider=hubspot&tenant=tenant-a' \
+  -H 'X-Admin-Token: your-admin-token' \
+  -H 'X-Request-ID: status-manual-001'
+
+# Example error payload (401/429/400/500):
+# {"request_id":"status-manual-001","error":"rate limit exceeded"}
+```
 
 ## Kubernetes
 

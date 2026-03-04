@@ -13,10 +13,12 @@ import (
 )
 
 const (
-	defaultConfigPath          = "config.yaml"
-	envPrefix                  = "TAP_"
-	defaultAdminReplayMaxLimit = 2000
-	maxAdminReplayMaxLimit     = 100000
+	defaultConfigPath           = "config.yaml"
+	envPrefix                   = "TAP_"
+	defaultAdminReplayMaxLimit  = 2000
+	maxAdminReplayMaxLimit      = 100000
+	defaultAdminRateLimitPerSec = 5.0
+	defaultAdminRateLimitBurst  = 20
 )
 
 type Config struct {
@@ -90,14 +92,16 @@ type ClickHouseConfig struct {
 }
 
 type ServerConfig struct {
-	Port                int           `koanf:"port"`
-	BasePath            string        `koanf:"base_path"`
-	ReadTimeout         time.Duration `koanf:"read_timeout"`
-	WriteTimeout        time.Duration `koanf:"write_timeout"`
-	MaxBodySize         int64         `koanf:"max_body_size"`
-	AdminToken          string        `koanf:"admin_token"`
-	AdminTokenSecondary string        `koanf:"admin_token_secondary"`
-	AdminReplayMaxLimit int           `koanf:"admin_replay_max_limit"`
+	Port                 int           `koanf:"port"`
+	BasePath             string        `koanf:"base_path"`
+	ReadTimeout          time.Duration `koanf:"read_timeout"`
+	WriteTimeout         time.Duration `koanf:"write_timeout"`
+	MaxBodySize          int64         `koanf:"max_body_size"`
+	AdminToken           string        `koanf:"admin_token"`
+	AdminTokenSecondary  string        `koanf:"admin_token_secondary"`
+	AdminReplayMaxLimit  int           `koanf:"admin_replay_max_limit"`
+	AdminRateLimitPerSec float64       `koanf:"admin_rate_limit_per_sec"`
+	AdminRateLimitBurst  int           `koanf:"admin_rate_limit_burst"`
 }
 
 type StateConfig struct {
@@ -154,6 +158,12 @@ func (c *Config) ApplyDefaults() {
 	if c.Server.AdminReplayMaxLimit == 0 {
 		c.Server.AdminReplayMaxLimit = defaultAdminReplayMaxLimit
 	}
+	if c.Server.AdminRateLimitPerSec == 0 {
+		c.Server.AdminRateLimitPerSec = defaultAdminRateLimitPerSec
+	}
+	if c.Server.AdminRateLimitBurst == 0 {
+		c.Server.AdminRateLimitBurst = defaultAdminRateLimitBurst
+	}
 	if c.State.Backend == "" {
 		c.State.Backend = "memory"
 	}
@@ -173,6 +183,12 @@ func (c Config) Validate() error {
 	}
 	if c.Server.AdminReplayMaxLimit <= 0 || c.Server.AdminReplayMaxLimit > maxAdminReplayMaxLimit {
 		return fmt.Errorf("server.admin_replay_max_limit must be in range 1..%d", maxAdminReplayMaxLimit)
+	}
+	if c.Server.AdminRateLimitPerSec <= 0 {
+		return fmt.Errorf("server.admin_rate_limit_per_sec must be greater than 0")
+	}
+	if c.Server.AdminRateLimitBurst <= 0 {
+		return fmt.Errorf("server.admin_rate_limit_burst must be greater than 0")
 	}
 	return nil
 }

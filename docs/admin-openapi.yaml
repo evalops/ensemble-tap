@@ -1,0 +1,226 @@
+openapi: 3.0.3
+info:
+  title: Ensemble Tap Admin API
+  version: "1.0.0"
+  description: Contract for authenticated admin endpoints exposed by Ensemble Tap.
+servers:
+  - url: http://localhost:8080
+paths:
+  /admin/replay-dlq:
+    post:
+      summary: Replay records from the DLQ back to NATS
+      security:
+        - AdminToken: []
+      parameters:
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+          description: Optional replay count request; runtime enforces configured max cap.
+        - in: header
+          name: X-Request-ID
+          required: false
+          schema:
+            type: string
+          description: Optional correlation identifier echoed back in response.
+      responses:
+        "200":
+          description: Replay completed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReplayResponse"
+        "400":
+          description: Invalid input (for example, bad limit value).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminError"
+        "401":
+          description: Missing or invalid admin token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminError"
+        "429":
+          description: Rate-limited by admin token-bucket.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                minimum: 1
+              description: Suggested wait time in seconds before retrying.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminError"
+        "500":
+          description: Replay failure.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminError"
+  /admin/poller-status:
+    get:
+      summary: Fetch in-memory runtime status for configured pollers
+      security:
+        - AdminToken: []
+      parameters:
+        - in: query
+          name: provider
+          required: false
+          schema:
+            type: string
+          description: Optional provider filter (case-insensitive).
+        - in: query
+          name: tenant
+          required: false
+          schema:
+            type: string
+          description: Optional tenant filter.
+        - in: header
+          name: X-Request-ID
+          required: false
+          schema:
+            type: string
+          description: Optional correlation identifier echoed back in response.
+      responses:
+        "200":
+          description: Poller status snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PollerStatusResponse"
+        "401":
+          description: Missing or invalid admin token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminError"
+        "429":
+          description: Rate-limited by admin token-bucket.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminError"
+components:
+  securitySchemes:
+    AdminToken:
+      type: apiKey
+      in: header
+      name: X-Admin-Token
+  schemas:
+    ReplayResponse:
+      type: object
+      required:
+        - request_id
+        - replayed
+        - effective_limit
+        - max_limit
+        - capped
+      properties:
+        request_id:
+          type: string
+        replayed:
+          type: integer
+          minimum: 0
+        requested_limit:
+          type: integer
+          minimum: 1
+        effective_limit:
+          type: integer
+          minimum: 1
+        max_limit:
+          type: integer
+          minimum: 1
+        capped:
+          type: boolean
+    PollerStatusResponse:
+      type: object
+      required:
+        - generated_at
+        - request_id
+        - provider
+        - tenant
+        - count
+        - pollers
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+        request_id:
+          type: string
+        provider:
+          type: string
+        tenant:
+          type: string
+        count:
+          type: integer
+          minimum: 0
+        pollers:
+          type: array
+          items:
+            $ref: "#/components/schemas/PollerStatus"
+    PollerStatus:
+      type: object
+      required:
+        - provider
+        - interval
+        - rate_limit_per_sec
+        - burst
+        - failure_budget
+        - circuit_break_duration
+        - jitter_ratio
+        - consecutive_failures
+      properties:
+        provider:
+          type: string
+        tenant_id:
+          type: string
+        interval:
+          type: string
+        rate_limit_per_sec:
+          type: number
+        burst:
+          type: integer
+          minimum: 1
+        failure_budget:
+          type: integer
+          minimum: 1
+        circuit_break_duration:
+          type: string
+        jitter_ratio:
+          type: number
+        last_run_at:
+          type: string
+          format: date-time
+        last_success_at:
+          type: string
+          format: date-time
+        last_error_at:
+          type: string
+          format: date-time
+        last_error:
+          type: string
+        last_checkpoint:
+          type: string
+        consecutive_failures:
+          type: integer
+          minimum: 0
+    AdminError:
+      type: object
+      required:
+        - request_id
+        - error
+      properties:
+        request_id:
+          type: string
+        error:
+          type: string

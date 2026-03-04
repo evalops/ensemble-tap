@@ -21,6 +21,16 @@
               "minimum": 1,
               "maximum": 100000,
               "description": "Maximum records replayed by POST /admin/replay-dlq."
+            },
+            "admin_rate_limit_per_sec": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Admin endpoint token-bucket refill rate (requests per second)."
+            },
+            "admin_rate_limit_burst": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Admin endpoint token-bucket burst size."
             }
           },
           "allOf": [

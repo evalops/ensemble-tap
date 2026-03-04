@@ -105,6 +105,8 @@ config:
     admin_token: ${TAP_ADMIN_TOKEN}
     admin_token_secondary: ${TAP_ADMIN_TOKEN_SECONDARY}
     admin_replay_max_limit: 2000
+    admin_rate_limit_per_sec: 5
+    admin_rate_limit_burst: 20
   state:
     backend: memory
     sqlite_path: /var/lib/ensemble-tap/state/tap-state.db
