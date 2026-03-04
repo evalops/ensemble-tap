@@ -53,7 +53,7 @@ func RunCycle(ctx context.Context, fetcher Fetcher, checkpoints CheckpointStore,
 	}
 
 	provider := fetcher.ProviderName()
-	stateProvider := stateProviderKey(provider, tenantID)
+	stateProvider := StateKey(provider, tenantID)
 	checkpoint, _ := checkpoints.Get(stateProvider)
 
 	res, err := fetcher.Fetch(ctx, checkpoint)
@@ -114,7 +114,7 @@ func dedupID(entity Entity, action, tenantID string) string {
 	return "poll_" + hex.EncodeToString(sum[:])
 }
 
-func stateProviderKey(provider, tenantID string) string {
+func StateKey(provider, tenantID string) string {
 	provider = strings.TrimSpace(provider)
 	tenantID = strings.TrimSpace(tenantID)
 	if tenantID == "" {

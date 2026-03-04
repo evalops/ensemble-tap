@@ -3,6 +3,7 @@ package main
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/evalops/ensemble-tap/config"
 	pollproviders "github.com/evalops/ensemble-tap/internal/poller/providers"
@@ -97,9 +98,12 @@ func TestBuildPollTargetsBaseOnly(t *testing.T) {
 
 func TestBuildPollTargetsTenantOverridesWithoutBaseCredentials(t *testing.T) {
 	base := config.ProviderConfig{
+		PollInterval:        60 * time.Second,
+		PollRateLimitPerSec: 4.0,
+		PollBurst:           1,
 		Tenants: map[string]config.ProviderTenantConfig{
-			"tenant-b": {AccessToken: "token-b"},
-			"tenant-a": {AccessToken: "token-a"},
+			"tenant-b": {AccessToken: "token-b", PollInterval: 30 * time.Second, PollRateLimitPerSec: 2.0, PollBurst: 2},
+			"tenant-a": {AccessToken: "token-a", PollInterval: 15 * time.Second, PollRateLimitPerSec: 8.0, PollBurst: 4},
 		},
 	}
 
@@ -110,8 +114,14 @@ func TestBuildPollTargetsTenantOverridesWithoutBaseCredentials(t *testing.T) {
 	if targets[0].TenantID != "tenant-a" || targets[0].AccessToken != "token-a" {
 		t.Fatalf("unexpected first target: %+v", targets[0])
 	}
+	if targets[0].PollInterval != 15*time.Second || targets[0].PollRateLimitPerSec != 8.0 || targets[0].PollBurst != 4 {
+		t.Fatalf("unexpected tenant-a poll settings: %+v", targets[0])
+	}
 	if targets[1].TenantID != "tenant-b" || targets[1].AccessToken != "token-b" {
 		t.Fatalf("unexpected second target: %+v", targets[1])
+	}
+	if targets[1].PollInterval != 30*time.Second || targets[1].PollRateLimitPerSec != 2.0 || targets[1].PollBurst != 2 {
+		t.Fatalf("unexpected tenant-b poll settings: %+v", targets[1])
 	}
 }
 
@@ -132,5 +142,23 @@ func TestBuildPollTargetsIncludesBaseWhenCredentialsPresent(t *testing.T) {
 	}
 	if targets[1].TenantID != "tenant-a" || targets[1].AccessToken != "token-a" {
 		t.Fatalf("unexpected tenant target: %+v", targets[1])
+	}
+}
+
+func TestPollLimiterDefaultsAndOverrides(t *testing.T) {
+	defaultLimiter, defaultPerSec, defaultBurst := pollLimiter(config.ProviderConfig{})
+	if defaultPerSec != 4.0 || defaultBurst != 1 {
+		t.Fatalf("unexpected defaults: perSec=%v burst=%d", defaultPerSec, defaultBurst)
+	}
+	if defaultLimiter.Limit() != 4.0 || defaultLimiter.Burst() != 1 {
+		t.Fatalf("unexpected default limiter config: limit=%v burst=%d", defaultLimiter.Limit(), defaultLimiter.Burst())
+	}
+
+	customLimiter, customPerSec, customBurst := pollLimiter(config.ProviderConfig{PollRateLimitPerSec: 12.5, PollBurst: 7})
+	if customPerSec != 12.5 || customBurst != 7 {
+		t.Fatalf("unexpected custom values: perSec=%v burst=%d", customPerSec, customBurst)
+	}
+	if customLimiter.Limit() != 12.5 || customLimiter.Burst() != 7 {
+		t.Fatalf("unexpected custom limiter config: limit=%v burst=%d", customLimiter.Limit(), customLimiter.Burst())
 	}
 }

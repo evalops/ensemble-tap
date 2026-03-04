@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -228,6 +229,141 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 	}
 	if string(got.Data) != string(payload) {
 		t.Fatalf("unexpected replay payload: %s", string(got.Data))
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("run returned error: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("run did not stop after cancel")
+	}
+}
+
+func TestRunAdminPollerStatusEndpoint(t *testing.T) {
+	s := runNATSServer(t)
+	port := freePort(t)
+
+	notionAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/search" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[],"has_more":false,"next_cursor":""}`))
+	}))
+	defer notionAPI.Close()
+
+	cfg := config.Config{
+		Providers: map[string]config.ProviderConfig{
+			"notion": {
+				Mode:                "poll",
+				BaseURL:             notionAPI.URL,
+				AccessToken:         "notion-token",
+				TenantID:            "tenant-ops",
+				PollInterval:        25 * time.Millisecond,
+				PollRateLimitPerSec: 9.0,
+				PollBurst:           3,
+			},
+		},
+		NATS: config.NATSConfig{
+			URL:           s.ClientURL(),
+			Stream:        "ENSEMBLE_TAP_CMD_TEST_POLLER_STATUS",
+			SubjectPrefix: "ensemble.tap",
+			MaxAge:        time.Hour,
+			DedupWindow:   time.Minute,
+		},
+		Server: config.ServerConfig{
+			Port:        port,
+			BasePath:    "/webhooks",
+			MaxBodySize: 1 << 20,
+			AdminToken:  "test-admin-token",
+		},
+	}
+	cfg.ApplyDefaults()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- run(ctx, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}()
+
+	readyURL := "http://127.0.0.1:" + intToString(port) + "/readyz"
+	if err := waitForStatusOrError(readyURL, http.StatusOK, 10*time.Second, errCh); err != nil {
+		t.Fatalf("ready endpoint never became healthy: %v", err)
+	}
+
+	statusURL := "http://127.0.0.1:" + intToString(port) + "/admin/poller-status"
+	reqNoToken, _ := http.NewRequest(http.MethodGet, statusURL, nil)
+	respNoToken, err := http.DefaultClient.Do(reqNoToken)
+	if err != nil {
+		t.Fatalf("request poller status without token: %v", err)
+	}
+	_ = respNoToken.Body.Close()
+	if respNoToken.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without admin token, got %d", respNoToken.StatusCode)
+	}
+
+	type pollerStatus struct {
+		Provider        string    `json:"provider"`
+		TenantID        string    `json:"tenant_id"`
+		Interval        string    `json:"interval"`
+		RateLimitPerSec float64   `json:"rate_limit_per_sec"`
+		Burst           int       `json:"burst"`
+		LastRunAt       time.Time `json:"last_run_at"`
+		LastSuccessAt   time.Time `json:"last_success_at"`
+		LastError       string    `json:"last_error"`
+	}
+	type pollerStatusResponse struct {
+		Pollers []pollerStatus `json:"pollers"`
+	}
+
+	var got pollerStatusResponse
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		reqWithToken, _ := http.NewRequest(http.MethodGet, statusURL, nil)
+		reqWithToken.Header.Set("X-Admin-Token", "test-admin-token")
+		respWithToken, err := http.DefaultClient.Do(reqWithToken)
+		if err != nil {
+			t.Fatalf("request poller status with token: %v", err)
+		}
+		if respWithToken.StatusCode != http.StatusOK {
+			_ = respWithToken.Body.Close()
+			t.Fatalf("expected 200 with admin token, got %d", respWithToken.StatusCode)
+		}
+		body, err := io.ReadAll(respWithToken.Body)
+		_ = respWithToken.Body.Close()
+		if err != nil {
+			t.Fatalf("read status response body: %v", err)
+		}
+		if err := json.Unmarshal(body, &got); err != nil {
+			t.Fatalf("decode status response body: %v", err)
+		}
+		if len(got.Pollers) > 0 && !got.Pollers[0].LastRunAt.IsZero() {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if len(got.Pollers) != 1 {
+		t.Fatalf("expected one poller status, got %d", len(got.Pollers))
+	}
+	status := got.Pollers[0]
+	if status.Provider != "notion" || status.TenantID != "tenant-ops" {
+		t.Fatalf("unexpected poller identity: %+v", status)
+	}
+	if status.Interval != "25ms" || status.RateLimitPerSec != 9.0 || status.Burst != 3 {
+		t.Fatalf("unexpected poller config status: %+v", status)
+	}
+	if status.LastRunAt.IsZero() || status.LastSuccessAt.IsZero() {
+		t.Fatalf("expected poller to have run successfully, got %+v", status)
+	}
+	if status.LastError != "" {
+		t.Fatalf("expected no poller error, got %q", status.LastError)
 	}
 
 	cancel()

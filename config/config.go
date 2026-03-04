@@ -30,6 +30,8 @@ type ProviderConfig struct {
 	Secret               string                          `koanf:"secret"`
 	Events               []string                        `koanf:"events"`
 	PollInterval         time.Duration                   `koanf:"poll_interval"`
+	PollRateLimitPerSec  float64                         `koanf:"poll_rate_limit_per_sec"`
+	PollBurst            int                             `koanf:"poll_burst"`
 	BaseURL              string                          `koanf:"base_url"`
 	AccessToken          string                          `koanf:"access_token"`
 	Objects              []string                        `koanf:"objects"`
@@ -49,14 +51,17 @@ type ProviderConfig struct {
 }
 
 type ProviderTenantConfig struct {
-	TenantID     string `koanf:"tenant_id"`
-	Secret       string `koanf:"secret"`
-	ClientSecret string `koanf:"client_secret"`
-	AccessToken  string `koanf:"access_token"`
-	APIKey       string `koanf:"api_key"`
-	BaseURL      string `koanf:"base_url"`
-	RealmID      string `koanf:"realm_id"`
-	RefreshToken string `koanf:"refresh_token"`
+	TenantID            string        `koanf:"tenant_id"`
+	Secret              string        `koanf:"secret"`
+	ClientSecret        string        `koanf:"client_secret"`
+	AccessToken         string        `koanf:"access_token"`
+	APIKey              string        `koanf:"api_key"`
+	BaseURL             string        `koanf:"base_url"`
+	RealmID             string        `koanf:"realm_id"`
+	RefreshToken        string        `koanf:"refresh_token"`
+	PollInterval        time.Duration `koanf:"poll_interval"`
+	PollRateLimitPerSec float64       `koanf:"poll_rate_limit_per_sec"`
+	PollBurst           int           `koanf:"poll_burst"`
 }
 
 type NATSConfig struct {

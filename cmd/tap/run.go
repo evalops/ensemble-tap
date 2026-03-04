@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -66,7 +67,8 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("initialize dlq publisher: %w", err)
 	}
 
-	startConfiguredPollers(ctx, cfg, publisher, dlqPublisher, logger, checkpointStore, snapshotStore)
+	pollerStatuses := newPollerStatusRegistry()
+	startConfiguredPollers(ctx, cfg, publisher, dlqPublisher, logger, checkpointStore, snapshotStore, pollerStatuses)
 
 	ingressServer := ingress.NewServer(cfg, publisher, metrics, logger)
 	ingressServer.SetDLQRecorder(dlqPublisher)
@@ -81,9 +83,17 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	}))
 	mux.Handle("GET /metrics", promhttp.Handler())
 	if strings.TrimSpace(cfg.Server.AdminToken) != "" {
-		mux.HandleFunc("POST /admin/replay-dlq", func(w http.ResponseWriter, r *http.Request) {
-			if strings.TrimSpace(r.Header.Get("X-Admin-Token")) != strings.TrimSpace(cfg.Server.AdminToken) {
+		adminToken := strings.TrimSpace(cfg.Server.AdminToken)
+		requireAdminToken := func(w http.ResponseWriter, r *http.Request) bool {
+			if strings.TrimSpace(r.Header.Get("X-Admin-Token")) != adminToken {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return false
+			}
+			return true
+		}
+
+		mux.HandleFunc("POST /admin/replay-dlq", func(w http.ResponseWriter, r *http.Request) {
+			if !requireAdminToken(w, r) {
 				return
 			}
 			limit := 100
@@ -101,6 +111,16 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"replayed": replayed})
+		})
+		mux.HandleFunc("GET /admin/poller-status", func(w http.ResponseWriter, r *http.Request) {
+			if !requireAdminToken(w, r) {
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"generated_at": time.Now().UTC(),
+				"pollers":      pollerStatuses.Snapshot(),
+			})
 		})
 	}
 
@@ -156,6 +176,134 @@ type pollSink struct {
 	tenantScopedNATSSubject bool
 }
 
+type pollerStatusSnapshot struct {
+	Provider            string    `json:"provider"`
+	TenantID            string    `json:"tenant_id,omitempty"`
+	Interval            string    `json:"interval"`
+	RateLimitPerSec     float64   `json:"rate_limit_per_sec"`
+	Burst               int       `json:"burst"`
+	LastRunAt           time.Time `json:"last_run_at,omitempty"`
+	LastSuccessAt       time.Time `json:"last_success_at,omitempty"`
+	LastErrorAt         time.Time `json:"last_error_at,omitempty"`
+	LastError           string    `json:"last_error,omitempty"`
+	LastCheckpoint      string    `json:"last_checkpoint,omitempty"`
+	ConsecutiveFailures int       `json:"consecutive_failures"`
+}
+
+type pollerStatusEntry struct {
+	mu       sync.RWMutex
+	snapshot pollerStatusSnapshot
+}
+
+func newPollerStatusEntry(provider, tenantID string, interval time.Duration, rateLimitPerSec float64, burst int) *pollerStatusEntry {
+	return &pollerStatusEntry{
+		snapshot: pollerStatusSnapshot{
+			Provider:        provider,
+			TenantID:        tenantID,
+			Interval:        interval.String(),
+			RateLimitPerSec: rateLimitPerSec,
+			Burst:           burst,
+		},
+	}
+}
+
+func (e *pollerStatusEntry) markRun(checkpoint string) {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	e.snapshot.LastRunAt = time.Now().UTC()
+	if strings.TrimSpace(checkpoint) != "" {
+		e.snapshot.LastCheckpoint = checkpoint
+	}
+	e.mu.Unlock()
+}
+
+func (e *pollerStatusEntry) markSuccess(checkpoint string) {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	e.snapshot.LastSuccessAt = time.Now().UTC()
+	e.snapshot.LastError = ""
+	e.snapshot.LastErrorAt = time.Time{}
+	e.snapshot.ConsecutiveFailures = 0
+	if strings.TrimSpace(checkpoint) != "" {
+		e.snapshot.LastCheckpoint = checkpoint
+	}
+	e.mu.Unlock()
+}
+
+func (e *pollerStatusEntry) markError(err error, checkpoint string) {
+	if e == nil || err == nil {
+		return
+	}
+	e.mu.Lock()
+	e.snapshot.LastError = err.Error()
+	e.snapshot.LastErrorAt = time.Now().UTC()
+	e.snapshot.ConsecutiveFailures++
+	if strings.TrimSpace(checkpoint) != "" {
+		e.snapshot.LastCheckpoint = checkpoint
+	}
+	e.mu.Unlock()
+}
+
+func (e *pollerStatusEntry) snapshotCopy() pollerStatusSnapshot {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.snapshot
+}
+
+type pollerStatusRegistry struct {
+	mu      sync.RWMutex
+	entries map[string]*pollerStatusEntry
+}
+
+func newPollerStatusRegistry() *pollerStatusRegistry {
+	return &pollerStatusRegistry{entries: map[string]*pollerStatusEntry{}}
+}
+
+func (r *pollerStatusRegistry) upsert(provider, tenantID string, interval time.Duration, rateLimitPerSec float64, burst int) *pollerStatusEntry {
+	if r == nil {
+		return nil
+	}
+	key := poller.StateKey(provider, tenantID)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.entries[key]
+	if !ok {
+		entry = newPollerStatusEntry(provider, tenantID, interval, rateLimitPerSec, burst)
+		r.entries[key] = entry
+		return entry
+	}
+	entry.mu.Lock()
+	entry.snapshot.Interval = interval.String()
+	entry.snapshot.RateLimitPerSec = rateLimitPerSec
+	entry.snapshot.Burst = burst
+	entry.mu.Unlock()
+	return entry
+}
+
+func (r *pollerStatusRegistry) Snapshot() []pollerStatusSnapshot {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	out := make([]pollerStatusSnapshot, 0, len(r.entries))
+	for _, entry := range r.entries {
+		out = append(out, entry.snapshotCopy())
+	}
+	r.mu.RUnlock()
+
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Provider == out[j].Provider {
+			return out[i].TenantID < out[j].TenantID
+		}
+		return out[i].Provider < out[j].Provider
+	})
+	return out
+}
+
 type cloudEventPublisher interface {
 	Publish(ctx context.Context, event cloudevents.Event, dedupID string) (string, error)
 }
@@ -201,7 +349,7 @@ func (s pollSink) recordDLQ(ctx context.Context, stage string, evt normalize.Nor
 	})
 }
 
-func startConfiguredPollers(ctx context.Context, cfg config.Config, publisher cloudEventPublisher, dlqPublisher *dlq.Publisher, logger *slog.Logger, checkpointStore store.CheckpointStore, snapshotStore store.SnapshotStore) {
+func startConfiguredPollers(ctx context.Context, cfg config.Config, publisher cloudEventPublisher, dlqPublisher *dlq.Publisher, logger *slog.Logger, checkpointStore store.CheckpointStore, snapshotStore store.SnapshotStore, statuses *pollerStatusRegistry) {
 	if checkpointStore == nil || snapshotStore == nil {
 		return
 	}
@@ -233,16 +381,29 @@ func startConfiguredPollers(ctx context.Context, cfg config.Config, publisher cl
 			if interval <= 0 {
 				interval = time.Minute
 			}
+			limiter, limitPerSec, burst := pollLimiter(target)
+			statusEntry := statuses.upsert(fetcher.ProviderName(), target.TenantID, interval, limitPerSec, burst)
+			stateKey := poller.StateKey(fetcher.ProviderName(), target.TenantID)
 
 			p := &poller.Poller{
 				Provider:    fetcher.ProviderName(),
 				Interval:    interval,
-				RateLimiter: rate.NewLimiter(rate.Every(250*time.Millisecond), 1),
-				Run: func(fetcher poller.Fetcher, tenantID string) poller.PollFn {
+				RateLimiter: limiter,
+				Run: func(fetcher poller.Fetcher, tenantID string, statusEntry *pollerStatusEntry, stateKey string) poller.PollFn {
 					return func(ctx context.Context) error {
-						return poller.RunCycle(ctx, fetcher, checkpointStore, snapshotStore, sink, tenantID)
+						checkpointBefore, _ := checkpointStore.Get(stateKey)
+						statusEntry.markRun(checkpointBefore)
+
+						err := poller.RunCycle(ctx, fetcher, checkpointStore, snapshotStore, sink, tenantID)
+						checkpointAfter, _ := checkpointStore.Get(stateKey)
+						if err != nil {
+							statusEntry.markError(err, checkpointAfter)
+							return err
+						}
+						statusEntry.markSuccess(checkpointAfter)
+						return nil
 					}
-				}(fetcher, target.TenantID),
+				}(fetcher, target.TenantID, statusEntry, stateKey),
 			}
 			logger.Info("starting provider poller", "provider", providerName, "tenant", target.TenantID, "interval", interval.String())
 			go func(p *poller.Poller) {
@@ -304,6 +465,18 @@ func hasBasePollCredentials(cfg config.ProviderConfig) bool {
 		strings.TrimSpace(cfg.APIKey) != "" ||
 		strings.TrimSpace(cfg.Secret) != "" ||
 		strings.TrimSpace(cfg.RefreshToken) != ""
+}
+
+func pollLimiter(cfg config.ProviderConfig) (*rate.Limiter, float64, int) {
+	limitPerSec := cfg.PollRateLimitPerSec
+	if limitPerSec <= 0 {
+		limitPerSec = 4.0
+	}
+	burst := cfg.PollBurst
+	if burst <= 0 {
+		burst = 1
+	}
+	return rate.NewLimiter(rate.Limit(limitPerSec), burst), limitPerSec, burst
 }
 
 func fetcherForProvider(name string, cfg config.ProviderConfig) poller.Fetcher {

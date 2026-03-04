@@ -1,27 +1,36 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestApplyProviderTenantOverridesFields(t *testing.T) {
 	base := ProviderConfig{
-		Secret:       "default-secret",
-		AccessToken:  "default-token",
-		ClientSecret: "default-client-secret",
-		APIKey:       "default-api-key",
-		BaseURL:      "https://default.example.com",
-		RealmID:      "realm-default",
-		RefreshToken: "refresh-default",
-		TenantID:     "base-tenant",
+		Secret:              "default-secret",
+		AccessToken:         "default-token",
+		ClientSecret:        "default-client-secret",
+		APIKey:              "default-api-key",
+		BaseURL:             "https://default.example.com",
+		RealmID:             "realm-default",
+		RefreshToken:        "refresh-default",
+		PollInterval:        60 * time.Second,
+		PollRateLimitPerSec: 2.0,
+		PollBurst:           1,
+		TenantID:            "base-tenant",
 		Tenants: map[string]ProviderTenantConfig{
 			"tenant-a": {
-				TenantID:     "tenant-a-id",
-				Secret:       "tenant-secret",
-				AccessToken:  "tenant-token",
-				ClientSecret: "tenant-client-secret",
-				APIKey:       "tenant-api-key",
-				BaseURL:      "https://tenant.example.com",
-				RealmID:      "realm-tenant",
-				RefreshToken: "refresh-tenant",
+				TenantID:            "tenant-a-id",
+				Secret:              "tenant-secret",
+				AccessToken:         "tenant-token",
+				ClientSecret:        "tenant-client-secret",
+				APIKey:              "tenant-api-key",
+				BaseURL:             "https://tenant.example.com",
+				RealmID:             "realm-tenant",
+				RefreshToken:        "refresh-tenant",
+				PollInterval:        30 * time.Second,
+				PollRateLimitPerSec: 6.0,
+				PollBurst:           3,
 			},
 		},
 	}
@@ -38,6 +47,9 @@ func TestApplyProviderTenantOverridesFields(t *testing.T) {
 	}
 	if merged.RefreshToken != "refresh-tenant" {
 		t.Fatalf("unexpected refresh token: %q", merged.RefreshToken)
+	}
+	if merged.PollInterval != 30*time.Second || merged.PollRateLimitPerSec != 6.0 || merged.PollBurst != 3 {
+		t.Fatalf("tenant poll settings were not applied: %+v", merged)
 	}
 	if merged.Tenants != nil {
 		t.Fatalf("merged config should not carry tenant map")

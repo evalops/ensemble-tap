@@ -44,6 +44,15 @@ func ApplyProviderTenant(base ProviderConfig, tenantKey string) ProviderConfig {
 	if v := strings.TrimSpace(tenantCfg.RefreshToken); v != "" {
 		out.RefreshToken = v
 	}
+	if tenantCfg.PollInterval > 0 {
+		out.PollInterval = tenantCfg.PollInterval
+	}
+	if tenantCfg.PollRateLimitPerSec > 0 {
+		out.PollRateLimitPerSec = tenantCfg.PollRateLimitPerSec
+	}
+	if tenantCfg.PollBurst > 0 {
+		out.PollBurst = tenantCfg.PollBurst
+	}
 	out.Tenants = nil
 	return out
 }

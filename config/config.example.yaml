@@ -20,11 +20,16 @@ providers:
     objects: ["deals", "contacts", "companies", "tickets"]
     query_per_page: 100
     poll_interval: 60s
+    poll_rate_limit_per_sec: 4
+    poll_burst: 1
     tenants:
       tenant-a:
         secret: ${HUBSPOT_TENANT_A_WEBHOOK_SECRET}
         access_token: ${HUBSPOT_TENANT_A_ACCESS_TOKEN}
         refresh_token: ${HUBSPOT_TENANT_A_REFRESH_TOKEN}
+        poll_interval: 30s
+        poll_rate_limit_per_sec: 8
+        poll_burst: 2
 
   salesforce:
     mode: poll
@@ -38,6 +43,8 @@ providers:
     objects: ["Opportunity"]
     query_per_page: 200
     poll_interval: 60s
+    poll_rate_limit_per_sec: 4
+    poll_burst: 1
 
   quickbooks:
     mode: poll
@@ -51,6 +58,8 @@ providers:
     objects: ["Customer"]
     query_per_page: 100
     poll_interval: 120s
+    poll_rate_limit_per_sec: 4
+    poll_burst: 1
 
   notion:
     mode: poll
@@ -62,6 +71,8 @@ providers:
     refresh_token: ${NOTION_REFRESH_TOKEN}
     query_per_page: 100
     poll_interval: 120s
+    poll_rate_limit_per_sec: 4
+    poll_burst: 1
 
   linear:
     mode: webhook

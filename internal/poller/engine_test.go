@@ -74,7 +74,7 @@ func TestRunCycleCreatesAndUpdatesEntities(t *testing.T) {
 	if sink.events[0].dedup == "" {
 		t.Fatalf("expected dedup id")
 	}
-	if cp, ok := checkpoints.Get(stateProviderKey("hubspot", "tenant-1")); !ok || cp == "" {
+	if cp, ok := checkpoints.Get(StateKey("hubspot", "tenant-1")); !ok || cp == "" {
 		t.Fatalf("expected checkpoint to be stored")
 	}
 
@@ -141,10 +141,10 @@ func TestRunCycleIsolatesTenantState(t *testing.T) {
 		t.Fatalf("expected created event for tenant-b, got %+v", sinkTenantB.events)
 	}
 
-	if _, ok := checkpoints.Get(stateProviderKey("hubspot", "tenant-a")); !ok {
+	if _, ok := checkpoints.Get(StateKey("hubspot", "tenant-a")); !ok {
 		t.Fatalf("expected tenant-a checkpoint")
 	}
-	if _, ok := checkpoints.Get(stateProviderKey("hubspot", "tenant-b")); !ok {
+	if _, ok := checkpoints.Get(StateKey("hubspot", "tenant-b")); !ok {
 		t.Fatalf("expected tenant-b checkpoint")
 	}
 }
