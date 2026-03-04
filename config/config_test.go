@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -75,6 +76,7 @@ func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
 	t.Setenv("TAP_NATS_SUBJECT_PREFIX", "ensemble.tap.custom")
 	t.Setenv("TAP_SERVER_MAX_BODY_SIZE", "2097152")
 	t.Setenv("TAP_SERVER_ADMIN_REPLAY_MAX_LIMIT", "1234")
+	t.Setenv("TAP_SERVER_ADMIN_TOKEN", "current-admin-token")
 	t.Setenv("TAP_SERVER_ADMIN_TOKEN_SECONDARY", "next-admin-token")
 	t.Setenv("TAP_CLICKHOUSE_FLUSH_INTERVAL", "3s")
 	t.Setenv("TAP_PROVIDERS_STRIPE_SECRET", "whsec_env")
@@ -94,6 +96,9 @@ func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
 	if cfg.Server.AdminReplayMaxLimit != 1234 {
 		t.Fatalf("expected server.admin_replay_max_limit override, got %d", cfg.Server.AdminReplayMaxLimit)
 	}
+	if cfg.Server.AdminToken != "current-admin-token" {
+		t.Fatalf("expected server.admin_token override")
+	}
 	if cfg.Server.AdminTokenSecondary != "next-admin-token" {
 		t.Fatalf("expected server.admin_token_secondary override")
 	}
@@ -105,5 +110,81 @@ func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
 	}
 	if cfg.Providers["hubspot"].ClientSecret != "hs_client_secret" {
 		t.Fatalf("expected providers.hubspot.client_secret override")
+	}
+}
+
+func TestConfigValidateAdminTokenAndReplayRules(t *testing.T) {
+	tests := []struct {
+		name       string
+		cfg        Config
+		wantErrSub string
+	}{
+		{
+			name: "secondary token requires primary",
+			cfg: Config{
+				Server: ServerConfig{
+					AdminTokenSecondary: "next-token",
+				},
+			},
+			wantErrSub: "admin_token_secondary requires",
+		},
+		{
+			name: "primary and secondary token must differ",
+			cfg: Config{
+				Server: ServerConfig{
+					AdminToken:          "same-token",
+					AdminTokenSecondary: "same-token",
+				},
+			},
+			wantErrSub: "must differ",
+		},
+		{
+			name: "replay max limit must be positive",
+			cfg: Config{
+				Server: ServerConfig{
+					AdminReplayMaxLimit: -1,
+				},
+			},
+			wantErrSub: "must be in range",
+		},
+		{
+			name: "replay max limit upper bound enforced",
+			cfg: Config{
+				Server: ServerConfig{
+					AdminReplayMaxLimit: 100001,
+				},
+			},
+			wantErrSub: "must be in range",
+		},
+		{
+			name: "valid token rotation and replay max",
+			cfg: Config{
+				Server: ServerConfig{
+					AdminToken:          "primary-token",
+					AdminTokenSecondary: "next-token",
+					AdminReplayMaxLimit: 5000,
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := tt.cfg
+			cfg.ApplyDefaults()
+			err := cfg.Validate()
+			if tt.wantErrSub == "" {
+				if err != nil {
+					t.Fatalf("unexpected validation error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected validation error containing %q", tt.wantErrSub)
+			}
+			if !strings.Contains(err.Error(), tt.wantErrSub) {
+				t.Fatalf("expected validation error containing %q, got %q", tt.wantErrSub, err.Error())
+			}
+		})
 	}
 }

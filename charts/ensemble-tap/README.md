@@ -34,6 +34,10 @@ helm upgrade --install ensemble-tap ./charts/ensemble-tap \
   --set config.server.admin_replay_max_limit=2000
 ```
 
+Notes:
+- `config.server.admin_replay_max_limit` is validated in chart schema and runtime (`1..100000`).
+- `config.server.admin_token_secondary` should only be used with `config.server.admin_token`.
+
 ## Enable sqlite state persistence
 
 ```bash

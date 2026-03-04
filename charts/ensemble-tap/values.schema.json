@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "config": {
+      "type": "object",
+      "properties": {
+        "server": {
+          "type": "object",
+          "properties": {
+            "admin_token": {
+              "type": "string",
+              "description": "Primary admin token for /admin endpoints."
+            },
+            "admin_token_secondary": {
+              "type": "string",
+              "description": "Optional secondary admin token used during rotation."
+            },
+            "admin_replay_max_limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000,
+              "description": "Maximum records replayed by POST /admin/replay-dlq."
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "admin_token_secondary": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "admin_token": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -61,10 +61,10 @@ When `server.admin_token` is set, these endpoints are available:
 
 - `POST /admin/replay-dlq?limit=100`
   - Requires header `X-Admin-Token`.
-  - Supports token rotation with `server.admin_token_secondary` (either primary or secondary token is accepted).
+  - Supports token rotation with `server.admin_token_secondary` (either primary or secondary token is accepted). `admin_token_secondary` requires `admin_token`, and both values must differ.
   - Optional header `X-Request-ID` (echoed back in `X-Request-ID` response header and `request_id` body field).
   - `limit` must be a positive integer.
-  - Replay is capped by `server.admin_replay_max_limit` (default `2000`); response includes `requested_limit`, `effective_limit`, `max_limit`, and `capped`.
+  - Replay is capped by `server.admin_replay_max_limit` (default `2000`, valid range `1..100000`); response includes `requested_limit`, `effective_limit`, `max_limit`, and `capped`. If `limit` is omitted, default replay (`100`) is still capped by `admin_replay_max_limit`.
 - `GET /admin/poller-status`
   - Requires header `X-Admin-Token`.
   - Supports token rotation with `server.admin_token_secondary`.

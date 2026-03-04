@@ -50,6 +50,10 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	cfg.ApplyDefaults()
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("validate runtime config: %w", err)
+	}
 
 	metrics := health.NewMetrics()
 	publisher, err := publish.NewNATSPublisher(ctx, cfg.NATS, metrics)
@@ -293,7 +297,11 @@ func parseReplayDLQLimit(raw string, maxLimit int) (requested int, effective int
 	raw = strings.TrimSpace(raw)
 	effective = defaultReplayDLQLimit
 	if raw == "" {
-		return 0, effective, false, nil
+		if effective > maxLimit {
+			effective = maxLimit
+			capped = true
+		}
+		return 0, effective, capped, nil
 	}
 	requested, err = strconv.Atoi(raw)
 	if err != nil {

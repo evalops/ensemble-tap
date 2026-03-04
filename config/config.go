@@ -13,8 +13,10 @@ import (
 )
 
 const (
-	defaultConfigPath = "config.yaml"
-	envPrefix         = "TAP_"
+	defaultConfigPath          = "config.yaml"
+	envPrefix                  = "TAP_"
+	defaultAdminReplayMaxLimit = 2000
+	maxAdminReplayMaxLimit     = 100000
 )
 
 type Config struct {
@@ -149,8 +151,8 @@ func (c *Config) ApplyDefaults() {
 	if c.Server.MaxBodySize == 0 {
 		c.Server.MaxBodySize = 1 << 20
 	}
-	if c.Server.AdminReplayMaxLimit <= 0 {
-		c.Server.AdminReplayMaxLimit = 2000
+	if c.Server.AdminReplayMaxLimit == 0 {
+		c.Server.AdminReplayMaxLimit = defaultAdminReplayMaxLimit
 	}
 	if c.State.Backend == "" {
 		c.State.Backend = "memory"
@@ -158,6 +160,21 @@ func (c *Config) ApplyDefaults() {
 	if c.State.SQLitePath == "" {
 		c.State.SQLitePath = "tap-state.db"
 	}
+}
+
+func (c Config) Validate() error {
+	primary := strings.TrimSpace(c.Server.AdminToken)
+	secondary := strings.TrimSpace(c.Server.AdminTokenSecondary)
+	if primary == "" && secondary != "" {
+		return fmt.Errorf("server.admin_token_secondary requires server.admin_token")
+	}
+	if primary != "" && secondary != "" && primary == secondary {
+		return fmt.Errorf("server.admin_token and server.admin_token_secondary must differ")
+	}
+	if c.Server.AdminReplayMaxLimit <= 0 || c.Server.AdminReplayMaxLimit > maxAdminReplayMaxLimit {
+		return fmt.Errorf("server.admin_replay_max_limit must be in range 1..%d", maxAdminReplayMaxLimit)
+	}
+	return nil
 }
 
 func Load(path string) (Config, error) {
@@ -200,6 +217,9 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("decode config: %w", err)
 	}
 	cfg.ApplyDefaults()
+	if err := cfg.Validate(); err != nil {
+		return Config{}, fmt.Errorf("validate config: %w", err)
+	}
 	return cfg, nil
 }
 

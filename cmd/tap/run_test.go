@@ -129,6 +129,23 @@ func TestRunReadinessReflectsNATSDisconnect(t *testing.T) {
 	}
 }
 
+func TestRunRejectsInvalidAdminConfig(t *testing.T) {
+	err := run(context.Background(), config.Config{
+		Server: config.ServerConfig{
+			AdminTokenSecondary: "next-admin-token",
+		},
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err == nil {
+		t.Fatalf("expected invalid admin config to fail before runtime start")
+	}
+	if !strings.Contains(err.Error(), "validate runtime config") {
+		t.Fatalf("expected validation error prefix, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "admin_token_secondary requires") {
+		t.Fatalf("expected secondary token validation error, got %v", err)
+	}
+}
+
 func TestSecureTokenEqual(t *testing.T) {
 	if secureTokenEqual("", "token") {
 		t.Fatalf("expected empty actual token to fail")
@@ -207,6 +224,14 @@ func TestParseReplayDLQLimit(t *testing.T) {
 	}
 	if req != 99999 || eff != 500 || !capped {
 		t.Fatalf("expected custom max cap to apply, got req=%d eff=%d capped=%v", req, eff, capped)
+	}
+
+	req, eff, capped, err = parseReplayDLQLimit("", 50)
+	if err != nil {
+		t.Fatalf("unexpected error with empty limit and low max: %v", err)
+	}
+	if req != 0 || eff != 50 || !capped {
+		t.Fatalf("expected empty limit to respect max cap, got req=%d eff=%d capped=%v", req, eff, capped)
 	}
 }
 
