@@ -92,30 +92,46 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	mux.Handle("GET /metrics", promhttp.Handler())
 	if strings.TrimSpace(cfg.Server.AdminToken) != "" {
 		adminToken := strings.TrimSpace(cfg.Server.AdminToken)
-		requireAdminToken := func(w http.ResponseWriter, r *http.Request) bool {
+		requireAdminToken := func(w http.ResponseWriter, r *http.Request) (string, bool) {
+			reqID := requestID(r)
+			userAgent := strings.TrimSpace(r.UserAgent())
+			requestIP := requesterIP(r)
+			w.Header().Set("X-Request-ID", reqID)
+			startedAt := time.Now()
 			if !secureTokenEqual(strings.TrimSpace(r.Header.Get("X-Admin-Token")), adminToken) {
 				logger.Warn("admin request unauthorized",
 					"path", r.URL.Path,
 					"method", r.Method,
-					"requester_ip", requesterIP(r),
+					"request_id", reqID,
+					"requester_ip", requestIP,
+					"user_agent", userAgent,
+					"duration_ms", time.Since(startedAt).Milliseconds(),
 				)
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return false
+				return reqID, false
 			}
-			return true
+			return reqID, true
 		}
 
 		mux.HandleFunc("POST /admin/replay-dlq", func(w http.ResponseWriter, r *http.Request) {
-			if !requireAdminToken(w, r) {
+			reqID, ok := requireAdminToken(w, r)
+			if !ok {
 				return
 			}
+			startedAt := time.Now()
+			userAgent := strings.TrimSpace(r.UserAgent())
 			requestIP := requesterIP(r)
 			requestedLimit, limit, capped, err := parseReplayDLQLimit(r.URL.Query().Get("limit"))
 			if err != nil {
 				logger.Warn("admin replay dlq rejected",
+					"path", r.URL.Path,
+					"method", r.Method,
+					"request_id", reqID,
 					"requester_ip", requestIP,
+					"user_agent", userAgent,
 					"requested_limit_raw", strings.TrimSpace(r.URL.Query().Get("limit")),
 					"error", err.Error(),
+					"duration_ms", time.Since(startedAt).Milliseconds(),
 				)
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
@@ -125,17 +141,23 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			})
 			if err != nil {
 				logger.Error("admin replay dlq failed",
+					"path", r.URL.Path,
+					"method", r.Method,
+					"request_id", reqID,
 					"requester_ip", requestIP,
+					"user_agent", userAgent,
 					"requested_limit", requestedLimit,
 					"effective_limit", limit,
 					"capped", capped,
 					"error", err.Error(),
+					"duration_ms", time.Since(startedAt).Milliseconds(),
 				)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
 			response := map[string]any{
+				"request_id":      reqID,
 				"replayed":        replayed,
 				"effective_limit": limit,
 				"max_limit":       maxReplayDLQLimit,
@@ -146,17 +168,25 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			}
 			_ = json.NewEncoder(w).Encode(response)
 			logger.Info("admin replay dlq completed",
+				"path", r.URL.Path,
+				"method", r.Method,
+				"request_id", reqID,
 				"requester_ip", requestIP,
+				"user_agent", userAgent,
 				"requested_limit", requestedLimit,
 				"effective_limit", limit,
 				"capped", capped,
 				"replayed_count", replayed,
+				"duration_ms", time.Since(startedAt).Milliseconds(),
 			)
 		})
 		mux.HandleFunc("GET /admin/poller-status", func(w http.ResponseWriter, r *http.Request) {
-			if !requireAdminToken(w, r) {
+			reqID, ok := requireAdminToken(w, r)
+			if !ok {
 				return
 			}
+			startedAt := time.Now()
+			userAgent := strings.TrimSpace(r.UserAgent())
 			requestIP := requesterIP(r)
 			providerFilter := strings.TrimSpace(r.URL.Query().Get("provider"))
 			tenantFilter := strings.TrimSpace(r.URL.Query().Get("tenant"))
@@ -164,16 +194,22 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"generated_at": time.Now().UTC(),
+				"request_id":   reqID,
 				"provider":     providerFilter,
 				"tenant":       tenantFilter,
 				"count":        len(statuses),
 				"pollers":      statuses,
 			})
 			logger.Info("admin poller status fetched",
+				"path", r.URL.Path,
+				"method", r.Method,
+				"request_id", reqID,
 				"requester_ip", requestIP,
+				"user_agent", userAgent,
 				"provider_filter", providerFilter,
 				"tenant_filter", tenantFilter,
 				"poller_count", len(statuses),
+				"duration_ms", time.Since(startedAt).Milliseconds(),
 			)
 		})
 	}
@@ -262,6 +298,19 @@ func requesterIP(r *http.Request) string {
 		return host
 	}
 	return remoteAddr
+}
+
+func requestID(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if id := strings.TrimSpace(r.Header.Get("X-Request-ID")); id != "" {
+		return id
+	}
+	if id := strings.TrimSpace(r.Header.Get("X-Correlation-ID")); id != "" {
+		return id
+	}
+	return "admin-" + strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
 }
 
 func openPollStores(cfg config.StateConfig) (store.CheckpointStore, store.SnapshotStore, closer, error) {

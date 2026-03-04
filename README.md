@@ -61,12 +61,15 @@ When `server.admin_token` is set, these endpoints are available:
 
 - `POST /admin/replay-dlq?limit=100`
   - Requires header `X-Admin-Token`.
+  - Optional header `X-Request-ID` (echoed back in `X-Request-ID` response header and `request_id` body field).
   - `limit` must be a positive integer.
   - Replay is capped at `2000` per request; response includes `requested_limit`, `effective_limit`, `max_limit`, and `capped`.
 - `GET /admin/poller-status`
   - Requires header `X-Admin-Token`.
+  - Optional header `X-Request-ID` (echoed back in `X-Request-ID` response header and `request_id` body field).
   - Optional filters: `provider` (case-insensitive), `tenant`.
   - Response includes `count` and per-poller runtime fields (`interval`, rate limiter values, failure budget, circuit-break duration, jitter ratio, last run/success/error details).
+  - Structured audit logs are emitted for authorized and unauthorized admin calls (`request_id`, requester IP, user-agent, path/method, and duration).
 
 ## Kubernetes
 

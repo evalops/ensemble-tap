@@ -205,6 +205,25 @@ func TestRequesterIP(t *testing.T) {
 	}
 }
 
+func TestRequestID(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/admin/poller-status", nil)
+	req.Header.Set("X-Request-ID", "req-123")
+	if got := requestID(req); got != "req-123" {
+		t.Fatalf("unexpected request id from header: %q", got)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/admin/poller-status", nil)
+	req.Header.Set("X-Correlation-ID", "corr-456")
+	if got := requestID(req); got != "corr-456" {
+		t.Fatalf("unexpected request id from correlation header: %q", got)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "http://example.com/admin/poller-status", nil)
+	if got := requestID(req); !strings.HasPrefix(got, "admin-") {
+		t.Fatalf("expected generated request id with admin- prefix, got %q", got)
+	}
+}
+
 func TestPollerStatusRegistrySnapshotFiltered(t *testing.T) {
 	registry := newPollerStatusRegistry()
 	registry.upsert("notion", "tenant-a", 25*time.Millisecond, 9.0, 3, 5, 30*time.Second, 0.2)
@@ -263,9 +282,16 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 	replayBaseURL := "http://127.0.0.1:" + intToString(port) + "/admin/replay-dlq"
 	replayURL := replayBaseURL + "?limit=1"
 	reqNoToken, _ := http.NewRequest(http.MethodPost, replayURL, nil)
+	reqNoToken.Header.Set("X-Request-ID", "replay-unauth-1")
+	reqNoToken.Header.Set("X-Forwarded-For", "203.0.113.50")
+	reqNoToken.Header.Set("User-Agent", "tap-admin-test/unauth")
 	respNoToken, err := http.DefaultClient.Do(reqNoToken)
 	if err != nil {
 		t.Fatalf("request replay without token: %v", err)
+	}
+	if got := strings.TrimSpace(respNoToken.Header.Get("X-Request-ID")); got != "replay-unauth-1" {
+		_ = respNoToken.Body.Close()
+		t.Fatalf("expected unauthorized response to echo request id, got %q", got)
 	}
 	_ = respNoToken.Body.Close()
 	if respNoToken.StatusCode != http.StatusUnauthorized {
@@ -273,9 +299,16 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 	}
 	reqInvalidLimit, _ := http.NewRequest(http.MethodPost, replayBaseURL+"?limit=invalid", nil)
 	reqInvalidLimit.Header.Set("X-Admin-Token", "test-admin-token")
+	reqInvalidLimit.Header.Set("X-Request-ID", "replay-invalid-1")
+	reqInvalidLimit.Header.Set("X-Forwarded-For", "203.0.113.51")
+	reqInvalidLimit.Header.Set("User-Agent", "tap-admin-test/invalid")
 	respInvalidLimit, err := http.DefaultClient.Do(reqInvalidLimit)
 	if err != nil {
 		t.Fatalf("request replay with invalid limit: %v", err)
+	}
+	if got := strings.TrimSpace(respInvalidLimit.Header.Get("X-Request-ID")); got != "replay-invalid-1" {
+		_ = respInvalidLimit.Body.Close()
+		t.Fatalf("expected invalid-limit response to echo request id, got %q", got)
 	}
 	_ = respInvalidLimit.Body.Close()
 	if respInvalidLimit.StatusCode != http.StatusBadRequest {
@@ -326,20 +359,28 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 
 	reqWithToken, _ := http.NewRequest(http.MethodPost, replayURL, nil)
 	reqWithToken.Header.Set("X-Admin-Token", "test-admin-token")
+	reqWithToken.Header.Set("X-Request-ID", "replay-success-1")
+	reqWithToken.Header.Set("X-Forwarded-For", "203.0.113.52")
+	reqWithToken.Header.Set("User-Agent", "tap-admin-test/success")
 	respWithToken, err := http.DefaultClient.Do(reqWithToken)
 	if err != nil {
 		t.Fatalf("request replay with token: %v", err)
+	}
+	if got := strings.TrimSpace(respWithToken.Header.Get("X-Request-ID")); got != "replay-success-1" {
+		_ = respWithToken.Body.Close()
+		t.Fatalf("expected success response to echo request id, got %q", got)
 	}
 	if respWithToken.StatusCode != http.StatusOK {
 		_ = respWithToken.Body.Close()
 		t.Fatalf("expected 200 with admin token, got %d", respWithToken.StatusCode)
 	}
 	type replayResponse struct {
-		Replayed       int  `json:"replayed"`
-		RequestedLimit int  `json:"requested_limit"`
-		EffectiveLimit int  `json:"effective_limit"`
-		MaxLimit       int  `json:"max_limit"`
-		Capped         bool `json:"capped"`
+		RequestID      string `json:"request_id"`
+		Replayed       int    `json:"replayed"`
+		RequestedLimit int    `json:"requested_limit"`
+		EffectiveLimit int    `json:"effective_limit"`
+		MaxLimit       int    `json:"max_limit"`
+		Capped         bool   `json:"capped"`
 	}
 	var replayResult replayResponse
 	replayBody, err := io.ReadAll(respWithToken.Body)
@@ -351,6 +392,7 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 		t.Fatalf("decode replay response body: %v", err)
 	}
 	if replayResult.Replayed != 1 ||
+		replayResult.RequestID != "replay-success-1" ||
 		replayResult.RequestedLimit != 1 ||
 		replayResult.EffectiveLimit != 1 ||
 		replayResult.MaxLimit != maxReplayDLQLimit ||
@@ -367,9 +409,16 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 	}
 	reqWithCap, _ := http.NewRequest(http.MethodPost, replayBaseURL+"?limit=99999", nil)
 	reqWithCap.Header.Set("X-Admin-Token", "test-admin-token")
+	reqWithCap.Header.Set("X-Request-ID", "replay-cap-1")
+	reqWithCap.Header.Set("X-Forwarded-For", "203.0.113.53")
+	reqWithCap.Header.Set("User-Agent", "tap-admin-test/cap")
 	respWithCap, err := http.DefaultClient.Do(reqWithCap)
 	if err != nil {
 		t.Fatalf("request replay with capped limit: %v", err)
+	}
+	if got := strings.TrimSpace(respWithCap.Header.Get("X-Request-ID")); got != "replay-cap-1" {
+		_ = respWithCap.Body.Close()
+		t.Fatalf("expected capped response to echo request id, got %q", got)
 	}
 	if respWithCap.StatusCode != http.StatusOK {
 		_ = respWithCap.Body.Close()
@@ -384,24 +433,88 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 	if err := json.Unmarshal(cappedBody, &cappedResult); err != nil {
 		t.Fatalf("decode capped replay response body: %v", err)
 	}
-	if cappedResult.RequestedLimit != 99999 ||
+	if cappedResult.RequestID != "replay-cap-1" ||
+		cappedResult.RequestedLimit != 99999 ||
 		cappedResult.EffectiveLimit != maxReplayDLQLimit ||
 		cappedResult.MaxLimit != maxReplayDLQLimit ||
 		!cappedResult.Capped {
 		t.Fatalf("unexpected capped replay response: %+v", cappedResult)
 	}
 	logEntries := parseJSONLogEntries(t, logBuf.String())
+	if _, ok := findLogEntry(logEntries, "admin request unauthorized", func(entry map[string]any) bool {
+		path, okPath := entry["path"].(string)
+		method, okMethod := entry["method"].(string)
+		requestID, okRequestID := entry["request_id"].(string)
+		ip, okIP := entry["requester_ip"].(string)
+		userAgent, okUA := entry["user_agent"].(string)
+		durationMS, okDuration := logFieldInt(entry, "duration_ms")
+		return okPath && okMethod && okRequestID && okIP && okUA && okDuration &&
+			path == "/admin/replay-dlq" &&
+			method == http.MethodPost &&
+			requestID == "replay-unauth-1" &&
+			ip == "203.0.113.50" &&
+			userAgent == "tap-admin-test/unauth" &&
+			durationMS >= 0
+	}); !ok {
+		t.Fatalf("expected unauthorized replay audit log with request metadata; logs=%s", logBuf.String())
+	}
+	if _, ok := findLogEntry(logEntries, "admin replay dlq rejected", func(entry map[string]any) bool {
+		path, okPath := entry["path"].(string)
+		method, okMethod := entry["method"].(string)
+		requestID, okRequestID := entry["request_id"].(string)
+		ip, okIP := entry["requester_ip"].(string)
+		userAgent, okUA := entry["user_agent"].(string)
+		rawLimit, okLimit := entry["requested_limit_raw"].(string)
+		durationMS, okDuration := logFieldInt(entry, "duration_ms")
+		return okPath && okMethod && okRequestID && okIP && okUA && okLimit && okDuration &&
+			path == "/admin/replay-dlq" &&
+			method == http.MethodPost &&
+			requestID == "replay-invalid-1" &&
+			ip == "203.0.113.51" &&
+			userAgent == "tap-admin-test/invalid" &&
+			rawLimit == "invalid" &&
+			durationMS >= 0
+	}); !ok {
+		t.Fatalf("expected rejected replay audit log with request metadata; logs=%s", logBuf.String())
+	}
 	replayLog, ok := findLogEntry(logEntries, "admin replay dlq completed", func(entry map[string]any) bool {
+		path, okPath := entry["path"].(string)
+		method, okMethod := entry["method"].(string)
+		requestID, okRequestID := entry["request_id"].(string)
 		requested, okRequested := logFieldInt(entry, "requested_limit")
 		effective, okEffective := logFieldInt(entry, "effective_limit")
 		replayed, okReplayed := logFieldInt(entry, "replayed_count")
 		ip, okIP := entry["requester_ip"].(string)
+		userAgent, okUA := entry["user_agent"].(string)
 		capped, okCapped := entry["capped"].(bool)
-		return okRequested && okEffective && okReplayed && okIP && okCapped &&
-			requested == 1 && effective == 1 && replayed == 1 && !capped && strings.TrimSpace(ip) != ""
+		durationMS, okDuration := logFieldInt(entry, "duration_ms")
+		return okPath && okMethod && okRequestID && okRequested && okEffective && okReplayed && okIP && okUA && okCapped && okDuration &&
+			path == "/admin/replay-dlq" &&
+			method == http.MethodPost &&
+			requestID == "replay-success-1" &&
+			requested == 1 &&
+			effective == 1 &&
+			replayed == 1 &&
+			ip == "203.0.113.52" &&
+			userAgent == "tap-admin-test/success" &&
+			!capped &&
+			durationMS >= 0
 	})
 	if !ok {
 		t.Fatalf("expected replay audit log with requester ip/effective limit/replayed count; logs=%s", logBuf.String())
+	}
+	if _, ok := findLogEntry(logEntries, "admin replay dlq completed", func(entry map[string]any) bool {
+		requestID, okRequestID := entry["request_id"].(string)
+		effective, okEffective := logFieldInt(entry, "effective_limit")
+		capped, okCapped := entry["capped"].(bool)
+		durationMS, okDuration := logFieldInt(entry, "duration_ms")
+		return okRequestID && okEffective && okCapped && okDuration &&
+			requestID == "replay-cap-1" &&
+			effective == maxReplayDLQLimit &&
+			capped &&
+			durationMS >= 0
+	}); !ok {
+		t.Fatalf("expected capped replay completion audit log; logs=%s", logBuf.String())
 	}
 	if _, exists := replayLog["requester_ip"]; !exists {
 		t.Fatalf("expected replay audit log to include requester_ip")
@@ -478,9 +591,16 @@ func TestRunAdminPollerStatusEndpoint(t *testing.T) {
 
 	statusURL := "http://127.0.0.1:" + intToString(port) + "/admin/poller-status"
 	reqNoToken, _ := http.NewRequest(http.MethodGet, statusURL, nil)
+	reqNoToken.Header.Set("X-Request-ID", "status-unauth-1")
+	reqNoToken.Header.Set("X-Forwarded-For", "203.0.113.60")
+	reqNoToken.Header.Set("User-Agent", "tap-status-test/unauth")
 	respNoToken, err := http.DefaultClient.Do(reqNoToken)
 	if err != nil {
 		t.Fatalf("request poller status without token: %v", err)
+	}
+	if got := strings.TrimSpace(respNoToken.Header.Get("X-Request-ID")); got != "status-unauth-1" {
+		_ = respNoToken.Body.Close()
+		t.Fatalf("expected unauthorized status response to echo request id, got %q", got)
 	}
 	_ = respNoToken.Body.Close()
 	if respNoToken.StatusCode != http.StatusUnauthorized {
@@ -501,18 +621,38 @@ func TestRunAdminPollerStatusEndpoint(t *testing.T) {
 		LastError       string    `json:"last_error"`
 	}
 	type pollerStatusResponse struct {
-		Provider string         `json:"provider"`
-		Tenant   string         `json:"tenant"`
-		Count    int            `json:"count"`
-		Pollers  []pollerStatus `json:"pollers"`
+		RequestID string         `json:"request_id"`
+		Provider  string         `json:"provider"`
+		Tenant    string         `json:"tenant"`
+		Count     int            `json:"count"`
+		Pollers   []pollerStatus `json:"pollers"`
 	}
-	readStatus := func(url string) pollerStatusResponse {
+	readStatus := func(url, reqID, userAgent, forwardedFor string) pollerStatusResponse {
 		t.Helper()
 		reqWithToken, _ := http.NewRequest(http.MethodGet, url, nil)
 		reqWithToken.Header.Set("X-Admin-Token", "test-admin-token")
+		if strings.TrimSpace(reqID) != "" {
+			reqWithToken.Header.Set("X-Request-ID", reqID)
+		}
+		if strings.TrimSpace(userAgent) != "" {
+			reqWithToken.Header.Set("User-Agent", userAgent)
+		}
+		if strings.TrimSpace(forwardedFor) != "" {
+			reqWithToken.Header.Set("X-Forwarded-For", forwardedFor)
+		}
 		respWithToken, err := http.DefaultClient.Do(reqWithToken)
 		if err != nil {
 			t.Fatalf("request poller status with token: %v", err)
+		}
+		wantReqID := strings.TrimSpace(reqID)
+		gotReqID := strings.TrimSpace(respWithToken.Header.Get("X-Request-ID"))
+		if wantReqID != "" && gotReqID != wantReqID {
+			_ = respWithToken.Body.Close()
+			t.Fatalf("expected status response request id %q, got %q", wantReqID, gotReqID)
+		}
+		if wantReqID == "" && gotReqID == "" {
+			_ = respWithToken.Body.Close()
+			t.Fatalf("expected status response to include generated request id")
 		}
 		if respWithToken.StatusCode != http.StatusOK {
 			_ = respWithToken.Body.Close()
@@ -533,7 +673,7 @@ func TestRunAdminPollerStatusEndpoint(t *testing.T) {
 	var got pollerStatusResponse
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		got = readStatus(statusURL)
+		got = readStatus(statusURL, "", "", "")
 		if len(got.Pollers) > 0 && !got.Pollers[0].LastRunAt.IsZero() {
 			break
 		}
@@ -560,33 +700,77 @@ func TestRunAdminPollerStatusEndpoint(t *testing.T) {
 		t.Fatalf("expected no poller error, got %q", status.LastError)
 	}
 
-	filteredProvider := readStatus(statusURL + "?provider=NOTION")
+	filteredProvider := readStatus(statusURL+"?provider=NOTION", "status-provider-1", "tap-status-test/provider", "203.0.113.61")
 	if filteredProvider.Provider != "NOTION" || filteredProvider.Count != 1 || len(filteredProvider.Pollers) != 1 {
 		t.Fatalf("unexpected provider-filter response: %+v", filteredProvider)
 	}
-	filteredTenant := readStatus(statusURL + "?tenant=missing-tenant")
+	if filteredProvider.RequestID != "status-provider-1" {
+		t.Fatalf("expected provider-filter request_id in response, got %q", filteredProvider.RequestID)
+	}
+	filteredTenant := readStatus(statusURL+"?tenant=missing-tenant", "status-tenant-1", "tap-status-test/tenant", "203.0.113.62")
 	if filteredTenant.Tenant != "missing-tenant" || filteredTenant.Count != 0 || len(filteredTenant.Pollers) != 0 {
 		t.Fatalf("unexpected tenant-filter response: %+v", filteredTenant)
 	}
-	filteredCombo := readStatus(statusURL + "?provider=notion&tenant=tenant-ops")
+	if filteredTenant.RequestID != "status-tenant-1" {
+		t.Fatalf("expected tenant-filter request_id in response, got %q", filteredTenant.RequestID)
+	}
+	filteredCombo := readStatus(statusURL+"?provider=notion&tenant=tenant-ops", "", "", "")
 	if filteredCombo.Count != 1 || len(filteredCombo.Pollers) != 1 {
 		t.Fatalf("unexpected combined-filter response: %+v", filteredCombo)
 	}
 	logEntries := parseJSONLogEntries(t, logBuf.String())
+	if _, ok := findLogEntry(logEntries, "admin request unauthorized", func(entry map[string]any) bool {
+		path, okPath := entry["path"].(string)
+		method, okMethod := entry["method"].(string)
+		requestID, okRequestID := entry["request_id"].(string)
+		ip, okIP := entry["requester_ip"].(string)
+		userAgent, okUA := entry["user_agent"].(string)
+		durationMS, okDuration := logFieldInt(entry, "duration_ms")
+		return okPath && okMethod && okRequestID && okIP && okUA && okDuration &&
+			path == "/admin/poller-status" &&
+			method == http.MethodGet &&
+			requestID == "status-unauth-1" &&
+			ip == "203.0.113.60" &&
+			userAgent == "tap-status-test/unauth" &&
+			durationMS >= 0
+	}); !ok {
+		t.Fatalf("expected unauthorized poller status audit log with request metadata; logs=%s", logBuf.String())
+	}
 	if _, ok := findLogEntry(logEntries, "admin poller status fetched", func(entry map[string]any) bool {
+		path, okPath := entry["path"].(string)
+		method, okMethod := entry["method"].(string)
+		requestID, okRequestID := entry["request_id"].(string)
 		provider, okProvider := entry["provider_filter"].(string)
 		tenant, okTenant := entry["tenant_filter"].(string)
 		count, okCount := logFieldInt(entry, "poller_count")
 		ip, okIP := entry["requester_ip"].(string)
-		return okProvider && okTenant && okCount && okIP &&
-			provider == "NOTION" && tenant == "" && count == 1 && strings.TrimSpace(ip) != ""
+		userAgent, okUA := entry["user_agent"].(string)
+		durationMS, okDuration := logFieldInt(entry, "duration_ms")
+		return okPath && okMethod && okRequestID && okProvider && okTenant && okCount && okIP && okUA && okDuration &&
+			path == "/admin/poller-status" &&
+			method == http.MethodGet &&
+			requestID == "status-provider-1" &&
+			provider == "NOTION" &&
+			tenant == "" &&
+			count == 1 &&
+			ip == "203.0.113.61" &&
+			userAgent == "tap-status-test/provider" &&
+			durationMS >= 0
 	}); !ok {
 		t.Fatalf("expected provider-filter poller status audit log with requester ip; logs=%s", logBuf.String())
 	}
 	if _, ok := findLogEntry(logEntries, "admin poller status fetched", func(entry map[string]any) bool {
+		requestID, okRequestID := entry["request_id"].(string)
 		tenant, okTenant := entry["tenant_filter"].(string)
 		count, okCount := logFieldInt(entry, "poller_count")
-		return okTenant && okCount && tenant == "missing-tenant" && count == 0
+		userAgent, okUA := entry["user_agent"].(string)
+		durationMS, okDuration := logFieldInt(entry, "duration_ms")
+		return okRequestID && okTenant && okCount && okUA && okDuration &&
+			requestID == "status-tenant-1" &&
+			tenant == "missing-tenant" &&
+			count == 0 &&
+			userAgent == "tap-status-test/tenant" &&
+			durationMS >= 0
 	}); !ok {
 		t.Fatalf("expected tenant-filter poller status audit log with poller_count=0; logs=%s", logBuf.String())
 	}
