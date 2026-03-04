@@ -45,3 +45,23 @@ server:
 		t.Fatalf("expected max_age 168h, got %s", cfg.NATS.MaxAge)
 	}
 }
+
+func TestLoadConfigMissingFileAppliesDefaults(t *testing.T) {
+	cfg, err := Load(filepath.Join(t.TempDir(), "missing.yaml"))
+	if err != nil {
+		t.Fatalf("load missing config file: %v", err)
+	}
+
+	if cfg.NATS.URL != "nats://localhost:4222" {
+		t.Fatalf("expected default nats url, got %q", cfg.NATS.URL)
+	}
+	if cfg.NATS.Stream != "ENSEMBLE_TAP" {
+		t.Fatalf("expected default stream, got %q", cfg.NATS.Stream)
+	}
+	if cfg.Server.Port != 8080 {
+		t.Fatalf("expected default server port, got %d", cfg.Server.Port)
+	}
+	if cfg.Server.BasePath != "/webhooks" {
+		t.Fatalf("expected default base path, got %q", cfg.Server.BasePath)
+	}
+}
