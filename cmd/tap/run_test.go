@@ -237,6 +237,77 @@ func TestParseReplayDLQLimit(t *testing.T) {
 	}
 }
 
+func TestParseReplayJobListLimit(t *testing.T) {
+	tests := []struct {
+		name       string
+		raw        string
+		want       int
+		wantErr    bool
+		wantErrSub string
+	}{
+		{name: "default empty", raw: "", want: defaultReplayListLimit},
+		{name: "explicit valid", raw: "25", want: 25},
+		{name: "capped", raw: "99999", want: maxReplayListLimit},
+		{name: "invalid zero", raw: "0", wantErr: true, wantErrSub: "greater than 0"},
+		{name: "invalid text", raw: "oops", wantErr: true, wantErrSub: "positive integer"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseReplayJobListLimit(tt.raw)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				if tt.wantErrSub != "" && !strings.Contains(err.Error(), tt.wantErrSub) {
+					t.Fatalf("unexpected error %q", err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("unexpected list limit: got %d want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseReplayJobStatusFilter(t *testing.T) {
+	tests := []struct {
+		name       string
+		raw        string
+		want       string
+		wantErr    bool
+		wantErrSub string
+	}{
+		{name: "empty all", raw: "", want: ""},
+		{name: "queued", raw: "queued", want: adminReplayJobStatusQueued},
+		{name: "running uppercase", raw: "RUNNING", want: adminReplayJobStatusRunning},
+		{name: "invalid", raw: "done", wantErr: true, wantErrSub: "invalid status"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseReplayJobStatusFilter(tt.raw)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				if tt.wantErrSub != "" && !strings.Contains(err.Error(), tt.wantErrSub) {
+					t.Fatalf("unexpected error %q", err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("unexpected status filter: got %q want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAdminRetryAfterSeconds(t *testing.T) {
 	tests := []struct {
 		limit float64
@@ -412,6 +483,40 @@ func TestAdminReplayJobRegistryCleansExpiredJobsOnRead(t *testing.T) {
 	}
 	if newJob.JobID == old.JobID {
 		t.Fatalf("expected new replay job id after expiry")
+	}
+}
+
+func TestAdminReplayJobRegistryList(t *testing.T) {
+	registry := newAdminReplayJobRegistry(128, time.Hour)
+	base := adminReplayJobSnapshot{
+		RequestedLimit: 5,
+		EffectiveLimit: 5,
+		MaxLimit:       2000,
+	}
+	first, _, _ := registry.GetOrCreate(base, "idem-list-1")
+	second, _, _ := registry.GetOrCreate(base, "idem-list-2")
+	registry.MarkSucceeded(first.JobID, 3)
+	registry.MarkFailed(second.JobID, "replay error")
+
+	allJobs, summary := registry.List("", 10)
+	if len(allJobs) != 2 {
+		t.Fatalf("expected list all jobs count=2, got %d", len(allJobs))
+	}
+	if summary[adminReplayJobStatusSucceeded] != 1 || summary[adminReplayJobStatusFailed] != 1 {
+		t.Fatalf("unexpected replay list summary: %+v", summary)
+	}
+
+	succeededJobs, succeededSummary := registry.List(adminReplayJobStatusSucceeded, 10)
+	if len(succeededJobs) != 1 || succeededJobs[0].JobID != first.JobID {
+		t.Fatalf("expected only succeeded job %q, got %+v", first.JobID, succeededJobs)
+	}
+	if succeededSummary[adminReplayJobStatusSucceeded] != 1 || succeededSummary[adminReplayJobStatusFailed] != 1 {
+		t.Fatalf("expected summary to reflect all statuses, got %+v", succeededSummary)
+	}
+
+	limitedJobs, _ := registry.List("", 1)
+	if len(limitedJobs) != 1 {
+		t.Fatalf("expected replay list limit=1 to return 1 job, got %d", len(limitedJobs))
 	}
 }
 
@@ -825,6 +930,67 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 		t.Fatalf("unexpected dry-run replay job completion: %+v", dryRunFinished)
 	}
 
+	reqListInvalid, _ := http.NewRequest(http.MethodGet, replayBaseURL+"?status=unknown", nil)
+	reqListInvalid.Header.Set("X-Admin-Token", "test-admin-token")
+	reqListInvalid.Header.Set("X-Request-ID", "replay-list-invalid-1")
+	respListInvalid, err := http.DefaultClient.Do(reqListInvalid)
+	if err != nil {
+		t.Fatalf("request replay list invalid status: %v", err)
+	}
+	if respListInvalid.StatusCode != http.StatusBadRequest {
+		_ = respListInvalid.Body.Close()
+		t.Fatalf("expected 400 for invalid replay list status, got %d", respListInvalid.StatusCode)
+	}
+	listInvalidErr := readAdminError(respListInvalid)
+	if listInvalidErr.RequestID != "replay-list-invalid-1" || !strings.Contains(listInvalidErr.Error, "invalid status") {
+		t.Fatalf("unexpected invalid replay list status payload: %+v", listInvalidErr)
+	}
+
+	reqListSucceeded, _ := http.NewRequest(http.MethodGet, replayBaseURL+"?status=succeeded&limit=5", nil)
+	reqListSucceeded.Header.Set("X-Admin-Token", "test-admin-token")
+	reqListSucceeded.Header.Set("X-Request-ID", "replay-list-success-1")
+	respListSucceeded, err := http.DefaultClient.Do(reqListSucceeded)
+	if err != nil {
+		t.Fatalf("request replay list succeeded: %v", err)
+	}
+	if respListSucceeded.StatusCode != http.StatusOK {
+		_ = respListSucceeded.Body.Close()
+		t.Fatalf("expected 200 for replay list, got %d", respListSucceeded.StatusCode)
+	}
+	var listSucceeded struct {
+		RequestID string              `json:"request_id"`
+		Status    string              `json:"status"`
+		Limit     int                 `json:"limit"`
+		Count     int                 `json:"count"`
+		Summary   map[string]int      `json:"summary"`
+		Jobs      []replayJobSnapshot `json:"jobs"`
+	}
+	listBody, err := io.ReadAll(respListSucceeded.Body)
+	_ = respListSucceeded.Body.Close()
+	if err != nil {
+		t.Fatalf("read replay list body: %v", err)
+	}
+	if err := json.Unmarshal(listBody, &listSucceeded); err != nil {
+		t.Fatalf("decode replay list body: %v body=%s", err, string(listBody))
+	}
+	if listSucceeded.RequestID != "replay-list-success-1" {
+		t.Fatalf("unexpected replay list request id: %+v", listSucceeded)
+	}
+	if listSucceeded.Status != "succeeded" || listSucceeded.Limit != 5 {
+		t.Fatalf("unexpected replay list filters: %+v", listSucceeded)
+	}
+	if listSucceeded.Count < 1 || len(listSucceeded.Jobs) < 1 {
+		t.Fatalf("expected replay list to return succeeded jobs, got %+v", listSucceeded)
+	}
+	if listSucceeded.Summary[adminReplayJobStatusSucceeded] < 1 {
+		t.Fatalf("expected succeeded summary count in replay list, got %+v", listSucceeded.Summary)
+	}
+	for _, listed := range listSucceeded.Jobs {
+		if listed.Status != adminReplayJobStatusSucceeded {
+			t.Fatalf("expected filtered replay list status=succeeded, got %+v", listed)
+		}
+	}
+
 	reqMissingStatus, _ := http.NewRequest(http.MethodGet, replayBaseURL+"/missing-job-id", nil)
 	reqMissingStatus.Header.Set("X-Admin-Token", "test-admin-token")
 	reqMissingStatus.Header.Set("X-Request-ID", "replay-status-missing-1")
@@ -957,6 +1123,14 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 	assertMetricAtLeast(t, metricsText, "tap_admin_requests_total", map[string]string{
 		"endpoint": adminEndpointReplayStatus,
 		"outcome":  adminOutcomeNotFound,
+	}, 1)
+	assertMetricAtLeast(t, metricsText, "tap_admin_requests_total", map[string]string{
+		"endpoint": adminEndpointReplayDLQList,
+		"outcome":  adminOutcomeBadRequest,
+	}, 1)
+	assertMetricAtLeast(t, metricsText, "tap_admin_requests_total", map[string]string{
+		"endpoint": adminEndpointReplayDLQList,
+		"outcome":  adminOutcomeSuccess,
 	}, 1)
 	assertMetricAtLeast(t, metricsText, "tap_admin_request_duration_seconds_count", map[string]string{
 		"endpoint": adminEndpointReplayDLQ,

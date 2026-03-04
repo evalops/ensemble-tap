@@ -134,6 +134,11 @@ func TestAdminOpenAPIContractMatchesRuntime(t *testing.T) {
 	replayConflictReq.Header.Set("Idempotency-Key", "openapi-idem-1")
 	_, _ = validateRoundTrip(replayConflictReq, http.StatusConflict)
 
+	replayListReq, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+intToString(port)+"/admin/replay-dlq?status=succeeded&limit=5", nil)
+	replayListReq.Header.Set("X-Admin-Token", "test-admin-token")
+	replayListReq.Header.Set("X-Request-ID", "openapi-replay-list-1")
+	_, _ = validateRoundTrip(replayListReq, http.StatusOK)
+
 	statusReq, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+intToString(port)+"/admin/replay-dlq/"+replayResp.Job.JobID, nil)
 	statusReq.Header.Set("X-Admin-Token", "test-admin-token")
 	statusReq.Header.Set("X-Request-ID", "openapi-status-1")

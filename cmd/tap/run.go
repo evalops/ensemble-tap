@@ -37,20 +37,23 @@ type readiness interface {
 }
 
 const (
-	defaultReplayDLQLimit = 100
-	maxReplayDLQLimit     = 2000
+	defaultReplayDLQLimit  = 100
+	maxReplayDLQLimit      = 2000
+	defaultReplayListLimit = 50
+	maxReplayListLimit     = 500
 
-	adminEndpointReplayDLQ    = "replay_dlq"
-	adminEndpointReplayStatus = "replay_dlq_status"
-	adminEndpointPollerStatus = "poller_status"
-	adminOutcomeSuccess       = "success"
-	adminOutcomeConflict      = "conflict"
-	adminOutcomeUnauthorized  = "unauthorized"
-	adminOutcomeForbidden     = "forbidden"
-	adminOutcomeNotFound      = "not_found"
-	adminOutcomeRateLimited   = "rate_limited"
-	adminOutcomeBadRequest    = "bad_request"
-	adminOutcomeInternalError = "error"
+	adminEndpointReplayDLQ     = "replay_dlq"
+	adminEndpointReplayDLQList = "replay_dlq_list"
+	adminEndpointReplayStatus  = "replay_dlq_status"
+	adminEndpointPollerStatus  = "poller_status"
+	adminOutcomeSuccess        = "success"
+	adminOutcomeConflict       = "conflict"
+	adminOutcomeUnauthorized   = "unauthorized"
+	adminOutcomeForbidden      = "forbidden"
+	adminOutcomeNotFound       = "not_found"
+	adminOutcomeRateLimited    = "rate_limited"
+	adminOutcomeBadRequest     = "bad_request"
+	adminOutcomeInternalError  = "error"
 
 	adminReplayJobStatusQueued    = "queued"
 	adminReplayJobStatusRunning   = "running"
@@ -236,6 +239,73 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 				RequestIP: requestIP,
 			}, true
 		}
+		mux.HandleFunc("GET /admin/replay-dlq", func(w http.ResponseWriter, r *http.Request) {
+			access, ok := requireAdminAccess(adminEndpointReplayDLQList, w, r)
+			if !ok {
+				return
+			}
+			startedAt := time.Now()
+			statusFilter, err := parseReplayJobStatusFilter(r.URL.Query().Get("status"))
+			if err != nil {
+				observeAdmin(adminEndpointReplayDLQList, adminOutcomeBadRequest, startedAt)
+				logger.Warn("admin replay dlq list rejected",
+					"path", r.URL.Path,
+					"method", r.Method,
+					"endpoint", adminEndpointReplayDLQList,
+					"request_id", access.RequestID,
+					"token_slot", access.TokenSlot,
+					"requester_ip", access.RequestIP,
+					"user_agent", access.UserAgent,
+					"status_raw", strings.TrimSpace(r.URL.Query().Get("status")),
+					"error", err.Error(),
+					"duration_ms", time.Since(startedAt).Milliseconds(),
+				)
+				writeAdminError(w, http.StatusBadRequest, access.RequestID, err.Error())
+				return
+			}
+			listLimit, err := parseReplayJobListLimit(r.URL.Query().Get("limit"))
+			if err != nil {
+				observeAdmin(adminEndpointReplayDLQList, adminOutcomeBadRequest, startedAt)
+				logger.Warn("admin replay dlq list rejected",
+					"path", r.URL.Path,
+					"method", r.Method,
+					"endpoint", adminEndpointReplayDLQList,
+					"request_id", access.RequestID,
+					"token_slot", access.TokenSlot,
+					"requester_ip", access.RequestIP,
+					"user_agent", access.UserAgent,
+					"limit_raw", strings.TrimSpace(r.URL.Query().Get("limit")),
+					"error", err.Error(),
+					"duration_ms", time.Since(startedAt).Milliseconds(),
+				)
+				writeAdminError(w, http.StatusBadRequest, access.RequestID, err.Error())
+				return
+			}
+			jobs, summary := replayJobs.List(statusFilter, listLimit)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"request_id": access.RequestID,
+				"status":     statusFilter,
+				"limit":      listLimit,
+				"count":      len(jobs),
+				"summary":    summary,
+				"jobs":       jobs,
+			})
+			observeAdmin(adminEndpointReplayDLQList, adminOutcomeSuccess, startedAt)
+			logger.Info("admin replay dlq list fetched",
+				"path", r.URL.Path,
+				"method", r.Method,
+				"endpoint", adminEndpointReplayDLQList,
+				"request_id", access.RequestID,
+				"token_slot", access.TokenSlot,
+				"requester_ip", access.RequestIP,
+				"user_agent", access.UserAgent,
+				"status_filter", statusFilter,
+				"limit", listLimit,
+				"count", len(jobs),
+				"duration_ms", time.Since(startedAt).Milliseconds(),
+			)
+		})
 
 		mux.HandleFunc("POST /admin/replay-dlq", func(w http.ResponseWriter, r *http.Request) {
 			access, ok := requireAdminAccess(adminEndpointReplayDLQ, w, r)
@@ -298,7 +368,7 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 					"token_slot", access.TokenSlot,
 					"requester_ip", access.RequestIP,
 					"user_agent", access.UserAgent,
-					"idempotency_key", idempotencyKey,
+					"idempotency_key_fingerprint", adminTokenFingerprint(idempotencyKey),
 					"job_id", job.JobID,
 					"requested_limit", requestedLimit,
 					"effective_limit", limit,
@@ -546,6 +616,37 @@ func parseReplayDLQLimit(raw string, maxLimit int) (requested int, effective int
 		capped = true
 	}
 	return requested, effective, capped, nil
+}
+
+func parseReplayJobListLimit(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultReplayListLimit, nil
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid list limit %q: must be a positive integer", raw)
+	}
+	if parsed <= 0 {
+		return 0, fmt.Errorf("invalid list limit %q: must be greater than 0", raw)
+	}
+	if parsed > maxReplayListLimit {
+		parsed = maxReplayListLimit
+	}
+	return parsed, nil
+}
+
+func parseReplayJobStatusFilter(raw string) (string, error) {
+	filter := strings.ToLower(strings.TrimSpace(raw))
+	if filter == "" {
+		return "", nil
+	}
+	switch filter {
+	case adminReplayJobStatusQueued, adminReplayJobStatusRunning, adminReplayJobStatusSucceeded, adminReplayJobStatusFailed:
+		return filter, nil
+	default:
+		return "", fmt.Errorf("invalid status %q: must be one of queued|running|succeeded|failed", strings.TrimSpace(raw))
+	}
 }
 
 func adminRetryAfterSeconds(limitPerSec float64) int {
@@ -935,6 +1036,55 @@ func (r *adminReplayJobRegistry) getByIdempotencyKeyLocked(key string) (adminRep
 		return adminReplayJobSnapshot{}, false
 	}
 	return job.snapshot, true
+}
+
+func (r *adminReplayJobRegistry) List(statusFilter string, limit int) ([]adminReplayJobSnapshot, map[string]int) {
+	statusFilter = strings.ToLower(strings.TrimSpace(statusFilter))
+	if limit <= 0 {
+		limit = defaultReplayListLimit
+	}
+	if limit > maxReplayListLimit {
+		limit = maxReplayListLimit
+	}
+	summary := map[string]int{
+		adminReplayJobStatusQueued:    0,
+		adminReplayJobStatusRunning:   0,
+		adminReplayJobStatusSucceeded: 0,
+		adminReplayJobStatusFailed:    0,
+	}
+	if r == nil {
+		return []adminReplayJobSnapshot{}, summary
+	}
+	now := time.Now().UTC()
+	r.mu.Lock()
+	r.cleanupLocked(now)
+	out := make([]adminReplayJobSnapshot, 0, len(r.jobs))
+	for _, job := range r.jobs {
+		if job == nil {
+			continue
+		}
+		status := strings.TrimSpace(job.snapshot.Status)
+		if _, ok := summary[status]; ok {
+			summary[status]++
+		}
+		if statusFilter != "" && status != statusFilter {
+			continue
+		}
+		out = append(out, job.snapshot)
+	}
+	r.mu.Unlock()
+	sort.Slice(out, func(i, j int) bool {
+		left := out[i]
+		right := out[j]
+		if left.CreatedAt.Equal(right.CreatedAt) {
+			return left.JobID > right.JobID
+		}
+		return left.CreatedAt.After(right.CreatedAt)
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, summary
 }
 
 func (r *adminReplayJobRegistry) MarkRunning(jobID string) {

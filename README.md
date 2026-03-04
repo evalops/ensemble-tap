@@ -15,6 +15,7 @@ Ensemble Tap is a standalone Go service that ingests SaaS webhook events, normal
 - Optional ClickHouse sink consuming from NATS with batched inserts.
 - Dead-letter queue recording for verification/normalization/publish failures.
 - Admin DLQ replay endpoints:
+  - `GET /admin/replay-dlq` lists replay jobs with optional `status` and `limit` filters.
   - `POST /admin/replay-dlq?limit=100` creates async replay jobs (with `dry_run` and idempotency support).
   - `GET /admin/replay-dlq/{job_id}` fetches replay job status/results.
 - Admin poller runtime status endpoint: `GET /admin/poller-status` guarded by `X-Admin-Token`, with optional `provider` and `tenant` filters.
@@ -74,6 +75,10 @@ When `server.admin_token` is set, these endpoints are available:
   - Replay is capped by `server.admin_replay_max_limit` (default `2000`, valid range `1..100000`); accepted response includes replay job metadata (`job_id`, `status`, `effective_limit`, `max_limit`, `capped`, `dry_run`).
   - Replay job metadata retention/capacity is configurable (`server.admin_replay_job_ttl`, `server.admin_replay_job_max_jobs`).
   - Replay execution is configurable (`server.admin_replay_job_timeout`, `server.admin_replay_max_concurrent_jobs`) for bounded runtime and concurrency.
+- `GET /admin/replay-dlq`
+  - Requires header `X-Admin-Token`.
+  - Optional query params: `status` (`queued|running|succeeded|failed`) and `limit` (max `500`, default `50`).
+  - Returns replay job list plus per-status summary counts for quick queue introspection.
 - `GET /admin/replay-dlq/{job_id}`
   - Requires header `X-Admin-Token`.
   - Returns current replay job state (`queued`, `running`, `succeeded`, `failed`) and result fields (`replayed`, `error`).
@@ -104,6 +109,11 @@ curl -i -X POST 'http://localhost:8080/admin/replay-dlq?limit=50' \
 curl -i -X POST 'http://localhost:8080/admin/replay-dlq?limit=200&dry_run=true' \
   -H 'X-Admin-Token: your-admin-token' \
   -H 'X-Request-ID: replay-dry-run-001'
+
+# Replay job list (latest succeeded jobs)
+curl -i 'http://localhost:8080/admin/replay-dlq?status=succeeded&limit=20' \
+  -H 'X-Admin-Token: your-admin-token' \
+  -H 'X-Request-ID: replay-list-001'
 
 # Replay job status
 curl -i 'http://localhost:8080/admin/replay-dlq/replay_1234567890_1' \

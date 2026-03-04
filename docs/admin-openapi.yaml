@@ -7,6 +7,68 @@ servers:
   - url: http://localhost:8080
 paths:
   /admin/replay-dlq:
+    get:
+      summary: List recent replay jobs and summary counts
+      security:
+        - AdminToken: []
+      parameters:
+        - in: query
+          name: status
+          required: false
+          schema:
+            type: string
+            enum: [queued, running, succeeded, failed]
+          description: Optional replay job status filter.
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+          description: Maximum number of jobs returned (default 50).
+        - in: header
+          name: X-Request-ID
+          required: false
+          schema:
+            type: string
+          description: Optional correlation identifier echoed back in response.
+      responses:
+        "200":
+          description: Replay job list and status summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReplayJobListResponse"
+        "400":
+          description: Invalid query input (for example, bad status or limit).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminError"
+        "401":
+          description: Missing or invalid admin token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminError"
+        "403":
+          description: Rejected by CIDR allowlist or mTLS requirement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminError"
+        "429":
+          description: Rate-limited by admin token-bucket.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminError"
     post:
       summary: Replay records from the DLQ back to NATS
       security:
@@ -205,6 +267,36 @@ components:
       in: header
       name: X-Admin-Token
   schemas:
+    ReplayJobListResponse:
+      type: object
+      required:
+        - request_id
+        - status
+        - limit
+        - count
+        - summary
+        - jobs
+      properties:
+        request_id:
+          type: string
+        status:
+          type: string
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 500
+        count:
+          type: integer
+          minimum: 0
+        summary:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReplayJob"
     ReplayJobEnvelope:
       type: object
       required:
