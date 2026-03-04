@@ -19,7 +19,12 @@ Ensemble Tap is a standalone Go service that ingests SaaS webhook events, normal
   - `GET /readyz`
   - `GET /metrics`
 - Config loading from YAML + `TAP_` env overrides
-- Poller and store scaffolding for Phase 2
+- Polling engine with checkpoint + snapshot diff event generation
+- Provider pollers for:
+  - HubSpot (CRM search by `hs_lastmodifieddate`)
+  - Salesforce (SOQL `LastModifiedDate` fallback)
+  - QuickBooks (`MetaData.LastUpdatedTime` query path)
+  - Notion (`/v1/search` with pagination and edited-time filtering)
 
 ## Quickstart
 

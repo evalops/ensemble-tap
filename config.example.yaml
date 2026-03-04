@@ -13,7 +13,35 @@ providers:
     app_id: ${HUBSPOT_APP_ID}
     client_secret: ${HUBSPOT_CLIENT_SECRET}
     api_key: ${HUBSPOT_API_KEY}
+    base_url: https://api.hubapi.com
+    objects: ["deals", "contacts", "companies", "tickets"]
+    query_per_page: 100
     poll_interval: 60s
+
+  salesforce:
+    mode: poll
+    base_url: ${SALESFORCE_BASE_URL}
+    access_token: ${SALESFORCE_ACCESS_TOKEN}
+    api_version: v59.0
+    objects: ["Opportunity"]
+    query_per_page: 200
+    poll_interval: 60s
+
+  quickbooks:
+    mode: poll
+    base_url: https://quickbooks.api.intuit.com
+    access_token: ${QBO_ACCESS_TOKEN}
+    realm_id: ${QBO_REALM_ID}
+    objects: ["Customer"]
+    query_per_page: 100
+    poll_interval: 120s
+
+  notion:
+    mode: poll
+    base_url: https://api.notion.com
+    access_token: ${NOTION_TOKEN}
+    query_per_page: 100
+    poll_interval: 120s
 
   linear:
     mode: webhook

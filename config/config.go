@@ -29,6 +29,12 @@ type ProviderConfig struct {
 	Secret               string        `koanf:"secret"`
 	Events               []string      `koanf:"events"`
 	PollInterval         time.Duration `koanf:"poll_interval"`
+	BaseURL              string        `koanf:"base_url"`
+	AccessToken          string        `koanf:"access_token"`
+	Objects              []string      `koanf:"objects"`
+	RealmID              string        `koanf:"realm_id"`
+	APIVersion           string        `koanf:"api_version"`
+	QueryPerPage         int           `koanf:"query_per_page"`
 	TenantID             string        `koanf:"tenant_id"`
 	AppID                string        `koanf:"app_id"`
 	ClientSecret         string        `koanf:"client_secret"`
