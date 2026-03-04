@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/hmac"
@@ -185,6 +186,25 @@ func TestParseReplayDLQLimit(t *testing.T) {
 	}
 }
 
+func TestRequesterIP(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/admin/poller-status", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+
+	if got := requesterIP(req); got != "127.0.0.1" {
+		t.Fatalf("unexpected remote requester ip: %q", got)
+	}
+
+	req.Header.Set("X-Real-IP", "10.0.0.5")
+	if got := requesterIP(req); got != "10.0.0.5" {
+		t.Fatalf("unexpected x-real-ip requester ip: %q", got)
+	}
+
+	req.Header.Set("X-Forwarded-For", "203.0.113.9, 10.0.0.7")
+	if got := requesterIP(req); got != "203.0.113.9" {
+		t.Fatalf("unexpected forwarded requester ip: %q", got)
+	}
+}
+
 func TestPollerStatusRegistrySnapshotFiltered(t *testing.T) {
 	registry := newPollerStatusRegistry()
 	registry.upsert("notion", "tenant-a", 25*time.Millisecond, 9.0, 3, 5, 30*time.Second, 0.2)
@@ -227,9 +247,12 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	var logBuf bytes.Buffer
+	testLogger := slog.New(slog.NewJSONHandler(&logBuf, nil))
+
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- run(ctx, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		errCh <- run(ctx, cfg, testLogger)
 	}()
 
 	readyURL := "http://127.0.0.1:" + intToString(port) + "/readyz"
@@ -367,6 +390,22 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 		!cappedResult.Capped {
 		t.Fatalf("unexpected capped replay response: %+v", cappedResult)
 	}
+	logEntries := parseJSONLogEntries(t, logBuf.String())
+	replayLog, ok := findLogEntry(logEntries, "admin replay dlq completed", func(entry map[string]any) bool {
+		requested, okRequested := logFieldInt(entry, "requested_limit")
+		effective, okEffective := logFieldInt(entry, "effective_limit")
+		replayed, okReplayed := logFieldInt(entry, "replayed_count")
+		ip, okIP := entry["requester_ip"].(string)
+		capped, okCapped := entry["capped"].(bool)
+		return okRequested && okEffective && okReplayed && okIP && okCapped &&
+			requested == 1 && effective == 1 && replayed == 1 && !capped && strings.TrimSpace(ip) != ""
+	})
+	if !ok {
+		t.Fatalf("expected replay audit log with requester ip/effective limit/replayed count; logs=%s", logBuf.String())
+	}
+	if _, exists := replayLog["requester_ip"]; !exists {
+		t.Fatalf("expected replay audit log to include requester_ip")
+	}
 
 	cancel()
 	select {
@@ -424,9 +463,12 @@ func TestRunAdminPollerStatusEndpoint(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	var logBuf bytes.Buffer
+	testLogger := slog.New(slog.NewJSONHandler(&logBuf, nil))
+
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- run(ctx, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		errCh <- run(ctx, cfg, testLogger)
 	}()
 
 	readyURL := "http://127.0.0.1:" + intToString(port) + "/readyz"
@@ -530,6 +572,24 @@ func TestRunAdminPollerStatusEndpoint(t *testing.T) {
 	if filteredCombo.Count != 1 || len(filteredCombo.Pollers) != 1 {
 		t.Fatalf("unexpected combined-filter response: %+v", filteredCombo)
 	}
+	logEntries := parseJSONLogEntries(t, logBuf.String())
+	if _, ok := findLogEntry(logEntries, "admin poller status fetched", func(entry map[string]any) bool {
+		provider, okProvider := entry["provider_filter"].(string)
+		tenant, okTenant := entry["tenant_filter"].(string)
+		count, okCount := logFieldInt(entry, "poller_count")
+		ip, okIP := entry["requester_ip"].(string)
+		return okProvider && okTenant && okCount && okIP &&
+			provider == "NOTION" && tenant == "" && count == 1 && strings.TrimSpace(ip) != ""
+	}); !ok {
+		t.Fatalf("expected provider-filter poller status audit log with requester ip; logs=%s", logBuf.String())
+	}
+	if _, ok := findLogEntry(logEntries, "admin poller status fetched", func(entry map[string]any) bool {
+		tenant, okTenant := entry["tenant_filter"].(string)
+		count, okCount := logFieldInt(entry, "poller_count")
+		return okTenant && okCount && tenant == "missing-tenant" && count == 0
+	}); !ok {
+		t.Fatalf("expected tenant-filter poller status audit log with poller_count=0; logs=%s", logBuf.String())
+	}
 
 	cancel()
 	select {
@@ -539,6 +599,63 @@ func TestRunAdminPollerStatusEndpoint(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatalf("run did not stop after cancel")
+	}
+}
+
+func parseJSONLogEntries(t *testing.T, raw string) []map[string]any {
+	t.Helper()
+	entries := make([]map[string]any, 0)
+	scanner := bufio.NewScanner(strings.NewReader(raw))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		entry := map[string]any{}
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan logs: %v", err)
+	}
+	return entries
+}
+
+func findLogEntry(entries []map[string]any, message string, predicate func(entry map[string]any) bool) (map[string]any, bool) {
+	for _, entry := range entries {
+		msg, _ := entry["msg"].(string)
+		if msg != message {
+			continue
+		}
+		if predicate == nil || predicate(entry) {
+			return entry, true
+		}
+	}
+	return nil, false
+}
+
+func logFieldInt(entry map[string]any, key string) (int, bool) {
+	value, ok := entry[key]
+	if !ok {
+		return 0, false
+	}
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int64:
+		return int(typed), true
+	case float64:
+		return int(typed), true
+	case json.Number:
+		parsed, err := typed.Int64()
+		if err != nil {
+			return 0, false
+		}
+		return int(parsed), true
+	default:
+		return 0, false
 	}
 }
 

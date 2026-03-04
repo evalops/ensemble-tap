@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"sort"
 	"strconv"
@@ -93,6 +94,11 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		adminToken := strings.TrimSpace(cfg.Server.AdminToken)
 		requireAdminToken := func(w http.ResponseWriter, r *http.Request) bool {
 			if !secureTokenEqual(strings.TrimSpace(r.Header.Get("X-Admin-Token")), adminToken) {
+				logger.Warn("admin request unauthorized",
+					"path", r.URL.Path,
+					"method", r.Method,
+					"requester_ip", requesterIP(r),
+				)
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return false
 			}
@@ -103,8 +109,14 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			if !requireAdminToken(w, r) {
 				return
 			}
+			requestIP := requesterIP(r)
 			requestedLimit, limit, capped, err := parseReplayDLQLimit(r.URL.Query().Get("limit"))
 			if err != nil {
+				logger.Warn("admin replay dlq rejected",
+					"requester_ip", requestIP,
+					"requested_limit_raw", strings.TrimSpace(r.URL.Query().Get("limit")),
+					"error", err.Error(),
+				)
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -112,6 +124,13 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 				return publisher.PublishRaw(ctx, subject, payload, dedupID)
 			})
 			if err != nil {
+				logger.Error("admin replay dlq failed",
+					"requester_ip", requestIP,
+					"requested_limit", requestedLimit,
+					"effective_limit", limit,
+					"capped", capped,
+					"error", err.Error(),
+				)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -126,11 +145,19 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 				response["requested_limit"] = requestedLimit
 			}
 			_ = json.NewEncoder(w).Encode(response)
+			logger.Info("admin replay dlq completed",
+				"requester_ip", requestIP,
+				"requested_limit", requestedLimit,
+				"effective_limit", limit,
+				"capped", capped,
+				"replayed_count", replayed,
+			)
 		})
 		mux.HandleFunc("GET /admin/poller-status", func(w http.ResponseWriter, r *http.Request) {
 			if !requireAdminToken(w, r) {
 				return
 			}
+			requestIP := requesterIP(r)
 			providerFilter := strings.TrimSpace(r.URL.Query().Get("provider"))
 			tenantFilter := strings.TrimSpace(r.URL.Query().Get("tenant"))
 			statuses := pollerStatuses.SnapshotFiltered(providerFilter, tenantFilter)
@@ -142,6 +169,12 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 				"count":        len(statuses),
 				"pollers":      statuses,
 			})
+			logger.Info("admin poller status fetched",
+				"requester_ip", requestIP,
+				"provider_filter", providerFilter,
+				"tenant_filter", tenantFilter,
+				"poller_count", len(statuses),
+			)
 		})
 	}
 
@@ -205,6 +238,30 @@ func parseReplayDLQLimit(raw string) (requested int, effective int, capped bool,
 		capped = true
 	}
 	return requested, effective, capped, nil
+}
+
+func requesterIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if raw := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); raw != "" {
+		first := strings.TrimSpace(strings.Split(raw, ",")[0])
+		if first != "" {
+			return first
+		}
+	}
+	if ip := strings.TrimSpace(r.Header.Get("X-Real-IP")); ip != "" {
+		return ip
+	}
+	remoteAddr := strings.TrimSpace(r.RemoteAddr)
+	if remoteAddr == "" {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err == nil && host != "" {
+		return host
+	}
+	return remoteAddr
 }
 
 func openPollStores(cfg config.StateConfig) (store.CheckpointStore, store.SnapshotStore, closer, error) {
