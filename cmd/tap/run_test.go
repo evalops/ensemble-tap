@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -289,6 +290,128 @@ func TestAdminAllowlistAndClientCertHelpers(t *testing.T) {
 	}
 	if adminHasClientCert(req, "X-Other-Cert") {
 		t.Fatalf("expected missing configured cert header to fail mTLS helper")
+	}
+}
+
+func TestAdminReplayJobRegistryGetOrCreateIdempotent(t *testing.T) {
+	registry := newAdminReplayJobRegistry(128, time.Hour)
+	base := adminReplayJobSnapshot{
+		RequestedLimit: 10,
+		EffectiveLimit: 10,
+		MaxLimit:       2000,
+		Capped:         false,
+		DryRun:         true,
+	}
+
+	const workers = 24
+	results := make([]adminReplayJobSnapshot, workers)
+	reused := make([]bool, workers)
+	conflicts := make([]bool, workers)
+
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			job, wasReused, wasConflict := registry.GetOrCreate(base, "idem-replay-atomic")
+			results[i] = job
+			reused[i] = wasReused
+			conflicts[i] = wasConflict
+		}()
+	}
+	wg.Wait()
+
+	firstID := strings.TrimSpace(results[0].JobID)
+	if firstID == "" {
+		t.Fatalf("expected first replay job id to be populated")
+	}
+
+	createdCount := 0
+	reusedCount := 0
+	for i := 0; i < workers; i++ {
+		if conflicts[i] {
+			t.Fatalf("expected no idempotency conflict for equivalent requests")
+		}
+		if strings.TrimSpace(results[i].JobID) != firstID {
+			t.Fatalf("expected all equivalent idempotent requests to return same job id")
+		}
+		if reused[i] {
+			reusedCount++
+		} else {
+			createdCount++
+		}
+	}
+	if createdCount != 1 || reusedCount != workers-1 {
+		t.Fatalf("unexpected idempotency counts: created=%d reused=%d", createdCount, reusedCount)
+	}
+
+	job, found := registry.GetByIdempotencyKey("idem-replay-atomic")
+	if !found || job.JobID != firstID {
+		t.Fatalf("expected idempotency key lookup to return created job")
+	}
+}
+
+func TestAdminReplayJobRegistryGetOrCreateConflict(t *testing.T) {
+	registry := newAdminReplayJobRegistry(128, time.Hour)
+	baseDryRun := adminReplayJobSnapshot{
+		RequestedLimit: 10,
+		EffectiveLimit: 10,
+		MaxLimit:       2000,
+		Capped:         false,
+		DryRun:         true,
+	}
+	initial, reused, conflict := registry.GetOrCreate(baseDryRun, "idem-replay-conflict")
+	if reused || conflict {
+		t.Fatalf("expected first idempotency call to create job; reused=%v conflict=%v", reused, conflict)
+	}
+
+	baseReplay := baseDryRun
+	baseReplay.DryRun = false
+	next, reused, conflict := registry.GetOrCreate(baseReplay, "idem-replay-conflict")
+	if !conflict || reused {
+		t.Fatalf("expected conflicting idempotency key use; reused=%v conflict=%v", reused, conflict)
+	}
+	if next.JobID != initial.JobID {
+		t.Fatalf("expected conflict response to reference original job id")
+	}
+
+	stored, found := registry.Get(initial.JobID)
+	if !found {
+		t.Fatalf("expected original job to remain present")
+	}
+	if !stored.DryRun {
+		t.Fatalf("expected original job parameters to remain unchanged")
+	}
+}
+
+func TestAdminReplayJobRegistryCleansExpiredJobsOnRead(t *testing.T) {
+	registry := newAdminReplayJobRegistry(32, 20*time.Millisecond)
+	base := adminReplayJobSnapshot{
+		RequestedLimit: 1,
+		EffectiveLimit: 1,
+		MaxLimit:       2000,
+		DryRun:         true,
+	}
+	old, reused, conflict := registry.GetOrCreate(base, "idem-replay-expired")
+	if reused || conflict {
+		t.Fatalf("expected initial job creation")
+	}
+
+	time.Sleep(80 * time.Millisecond)
+	if _, found := registry.Get(old.JobID); found {
+		t.Fatalf("expected expired replay job lookup by id to be pruned")
+	}
+	if _, found := registry.GetByIdempotencyKey("idem-replay-expired"); found {
+		t.Fatalf("expected expired idempotency mapping to be pruned")
+	}
+
+	newJob, reused, conflict := registry.GetOrCreate(base, "idem-replay-expired")
+	if reused || conflict {
+		t.Fatalf("expected new idempotency create after TTL expiry")
+	}
+	if newJob.JobID == old.JobID {
+		t.Fatalf("expected new replay job id after expiry")
 	}
 }
 
@@ -681,6 +804,22 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 	if !dryRunReused.IdempotencyReused || dryRunReused.Job.JobID != dryRunAccepted.Job.JobID {
 		t.Fatalf("expected reused dry-run job, got %+v", dryRunReused)
 	}
+	reqDryRunConflict, _ := http.NewRequest(http.MethodPost, replayBaseURL+"?dry_run=false&limit=11", nil)
+	reqDryRunConflict.Header.Set("X-Admin-Token", "test-admin-token")
+	reqDryRunConflict.Header.Set("X-Request-ID", "replay-dry-conflict-1")
+	reqDryRunConflict.Header.Set("Idempotency-Key", "idem-replay-1")
+	respDryRunConflict, err := http.DefaultClient.Do(reqDryRunConflict)
+	if err != nil {
+		t.Fatalf("request replay dry-run idempotency conflict: %v", err)
+	}
+	if respDryRunConflict.StatusCode != http.StatusConflict {
+		_ = respDryRunConflict.Body.Close()
+		t.Fatalf("expected 409 for idempotency conflict, got %d", respDryRunConflict.StatusCode)
+	}
+	dryRunConflict := readAdminError(respDryRunConflict)
+	if dryRunConflict.RequestID != "replay-dry-conflict-1" || !strings.Contains(dryRunConflict.Error, "idempotency key") {
+		t.Fatalf("unexpected idempotency conflict payload: %+v", dryRunConflict)
+	}
 	dryRunFinished := waitReplayJob("test-admin-token", "replay-status-dry-1", dryRunAccepted.Job.JobID)
 	if dryRunFinished.Status != adminReplayJobStatusSucceeded || !dryRunFinished.DryRun {
 		t.Fatalf("unexpected dry-run replay job completion: %+v", dryRunFinished)
@@ -785,6 +924,12 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 	}); !ok {
 		t.Fatalf("expected replay idempotency reuse audit log; logs=%s", logBuf.String())
 	}
+	if _, ok := findLogEntry(logEntries, "admin replay dlq idempotency conflict", func(entry map[string]any) bool {
+		requestID, okRequestID := entry["request_id"].(string)
+		return okRequestID && requestID == "replay-dry-conflict-1"
+	}); !ok {
+		t.Fatalf("expected replay idempotency conflict audit log; logs=%s", logBuf.String())
+	}
 	if _, exists := replayLog["requester_ip"]; !exists {
 		t.Fatalf("expected replay audit log to include requester_ip")
 	}
@@ -801,6 +946,10 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 		"endpoint": adminEndpointReplayDLQ,
 		"outcome":  adminOutcomeSuccess,
 	}, 3)
+	assertMetricAtLeast(t, metricsText, "tap_admin_requests_total", map[string]string{
+		"endpoint": adminEndpointReplayDLQ,
+		"outcome":  adminOutcomeConflict,
+	}, 1)
 	assertMetricAtLeast(t, metricsText, "tap_admin_requests_total", map[string]string{
 		"endpoint": adminEndpointReplayStatus,
 		"outcome":  adminOutcomeSuccess,

@@ -44,6 +44,7 @@ const (
 	adminEndpointReplayStatus = "replay_dlq_status"
 	adminEndpointPollerStatus = "poller_status"
 	adminOutcomeSuccess       = "success"
+	adminOutcomeConflict      = "conflict"
 	adminOutcomeUnauthorized  = "unauthorized"
 	adminOutcomeForbidden     = "forbidden"
 	adminOutcomeNotFound      = "not_found"
@@ -267,36 +268,55 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 				return
 			}
 			idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-			if idempotencyKey != "" {
-				if existing, found := replayJobs.GetByIdempotencyKey(idempotencyKey); found {
-					w.Header().Set("Content-Type", "application/json")
-					_ = json.NewEncoder(w).Encode(map[string]any{
-						"request_id":         access.RequestID,
-						"idempotency_reused": true,
-						"job":                existing,
-					})
-					observeAdmin(adminEndpointReplayDLQ, adminOutcomeSuccess, startedAt)
-					logger.Info("admin replay dlq idempotency reused",
-						"path", r.URL.Path,
-						"method", r.Method,
-						"endpoint", adminEndpointReplayDLQ,
-						"request_id", access.RequestID,
-						"token_slot", access.TokenSlot,
-						"requester_ip", access.RequestIP,
-						"user_agent", access.UserAgent,
-						"job_id", existing.JobID,
-						"duration_ms", time.Since(startedAt).Milliseconds(),
-					)
-					return
-				}
-			}
-			job := replayJobs.Create(adminReplayJobSnapshot{
+			job, idempotencyReused, idempotencyConflict := replayJobs.GetOrCreate(adminReplayJobSnapshot{
 				RequestedLimit: requestedLimit,
 				EffectiveLimit: limit,
 				MaxLimit:       adminReplayMaxLimit,
 				Capped:         capped,
 				DryRun:         dryRun,
 			}, idempotencyKey)
+			if idempotencyConflict {
+				observeAdmin(adminEndpointReplayDLQ, adminOutcomeConflict, startedAt)
+				logger.Warn("admin replay dlq idempotency conflict",
+					"path", r.URL.Path,
+					"method", r.Method,
+					"endpoint", adminEndpointReplayDLQ,
+					"request_id", access.RequestID,
+					"token_slot", access.TokenSlot,
+					"requester_ip", access.RequestIP,
+					"user_agent", access.UserAgent,
+					"idempotency_key", idempotencyKey,
+					"job_id", job.JobID,
+					"requested_limit", requestedLimit,
+					"effective_limit", limit,
+					"dry_run", dryRun,
+					"duration_ms", time.Since(startedAt).Milliseconds(),
+				)
+				writeAdminError(w, http.StatusConflict, access.RequestID, "idempotency key already used for different replay parameters")
+				return
+			}
+			if idempotencyReused {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"request_id":         access.RequestID,
+					"idempotency_reused": true,
+					"job":                job,
+				})
+				observeAdmin(adminEndpointReplayDLQ, adminOutcomeSuccess, startedAt)
+				logger.Info("admin replay dlq idempotency reused",
+					"path", r.URL.Path,
+					"method", r.Method,
+					"endpoint", adminEndpointReplayDLQ,
+					"request_id", access.RequestID,
+					"token_slot", access.TokenSlot,
+					"requester_ip", access.RequestIP,
+					"user_agent", access.UserAgent,
+					"job_id", job.JobID,
+					"duration_ms", time.Since(startedAt).Milliseconds(),
+				)
+				return
+			}
 			go func(jobID string, limit int, dryRun bool, tokenSlot, requestIP string) {
 				replayJobs.MarkRunning(jobID)
 				if dryRun {
@@ -324,7 +344,7 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 				}
 				replayJobs.MarkSucceeded(jobID, replayed)
 				logger.Info("admin replay dlq job completed", "job_id", jobID, "token_slot", tokenSlot, "requester_ip", requestIP, "replayed_count", replayed)
-			}(job.JobID, limit, dryRun, access.TokenSlot, access.RequestIP)
+			}(job.JobID, job.EffectiveLimit, job.DryRun, access.TokenSlot, access.RequestIP)
 
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusAccepted)
@@ -780,6 +800,14 @@ type adminReplayJob struct {
 	updatedAt      time.Time
 }
 
+func adminReplayJobRequestEquivalent(existing, requested adminReplayJobSnapshot) bool {
+	return existing.RequestedLimit == requested.RequestedLimit &&
+		existing.EffectiveLimit == requested.EffectiveLimit &&
+		existing.MaxLimit == requested.MaxLimit &&
+		existing.Capped == requested.Capped &&
+		existing.DryRun == requested.DryRun
+}
+
 type adminReplayJobRegistry struct {
 	mu            sync.RWMutex
 	jobs          map[string]*adminReplayJob
@@ -805,10 +833,27 @@ func newAdminReplayJobRegistry(maxJobs int, ttl time.Duration) *adminReplayJobRe
 }
 
 func (r *adminReplayJobRegistry) Create(base adminReplayJobSnapshot, idempotencyKey string) adminReplayJobSnapshot {
+	job, _, _ := r.GetOrCreate(base, idempotencyKey)
+	return job
+}
+
+func (r *adminReplayJobRegistry) GetOrCreate(base adminReplayJobSnapshot, idempotencyKey string) (adminReplayJobSnapshot, bool, bool) {
+	if r == nil {
+		return adminReplayJobSnapshot{}, false, false
+	}
 	now := time.Now().UTC()
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.cleanupLocked(now)
+	if idempotencyKey != "" {
+		if existing, found := r.getByIdempotencyKeyLocked(idempotencyKey); found {
+			if adminReplayJobRequestEquivalent(existing, base) {
+				return existing, true, false
+			}
+			return existing, false, true
+		}
+	}
 	r.sequence++
 	jobID := fmt.Sprintf("replay_%d_%d", now.UnixNano(), r.sequence)
 	base.JobID = jobID
@@ -816,14 +861,14 @@ func (r *adminReplayJobRegistry) Create(base adminReplayJobSnapshot, idempotency
 	base.CreatedAt = now
 	job := &adminReplayJob{
 		snapshot:       base,
-		idempotencyKey: strings.TrimSpace(idempotencyKey),
+		idempotencyKey: idempotencyKey,
 		updatedAt:      now,
 	}
 	r.jobs[jobID] = job
 	if job.idempotencyKey != "" {
 		r.byIdempotency[job.idempotencyKey] = jobID
 	}
-	return base
+	return base, false, false
 }
 
 func (r *adminReplayJobRegistry) Get(jobID string) (adminReplayJobSnapshot, bool) {
@@ -831,14 +876,16 @@ func (r *adminReplayJobRegistry) Get(jobID string) (adminReplayJobSnapshot, bool
 	if r == nil || jobID == "" {
 		return adminReplayJobSnapshot{}, false
 	}
-	r.mu.RLock()
+	now := time.Now().UTC()
+	r.mu.Lock()
+	r.cleanupLocked(now)
 	job := r.jobs[jobID]
 	if job == nil {
-		r.mu.RUnlock()
+		r.mu.Unlock()
 		return adminReplayJobSnapshot{}, false
 	}
 	snapshot := job.snapshot
-	r.mu.RUnlock()
+	r.mu.Unlock()
 	return snapshot, true
 }
 
@@ -847,16 +894,20 @@ func (r *adminReplayJobRegistry) GetByIdempotencyKey(key string) (adminReplayJob
 	if r == nil || key == "" {
 		return adminReplayJobSnapshot{}, false
 	}
-	r.mu.RLock()
+	now := time.Now().UTC()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cleanupLocked(now)
+	return r.getByIdempotencyKeyLocked(key)
+}
+
+func (r *adminReplayJobRegistry) getByIdempotencyKeyLocked(key string) (adminReplayJobSnapshot, bool) {
 	jobID := r.byIdempotency[key]
 	job := r.jobs[jobID]
 	if job == nil {
-		r.mu.RUnlock()
 		return adminReplayJobSnapshot{}, false
 	}
-	snapshot := job.snapshot
-	r.mu.RUnlock()
-	return snapshot, true
+	return job.snapshot, true
 }
 
 func (r *adminReplayJobRegistry) MarkRunning(jobID string) {

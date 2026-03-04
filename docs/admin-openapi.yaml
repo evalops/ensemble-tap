@@ -36,7 +36,7 @@ paths:
           required: false
           schema:
             type: string
-          description: Reuses an existing replay job when the same key is provided.
+          description: Reuses an existing replay job for equivalent replay parameters when the same key is provided.
       responses:
         "200":
           description: Existing replay job returned due to idempotency-key reuse.
@@ -50,6 +50,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReplayJobEnvelope"
+        "409":
+          description: Idempotency-Key was reused with different replay parameters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminError"
         "400":
           description: Invalid input (for example, bad limit value).
           content:

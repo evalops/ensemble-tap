@@ -64,7 +64,7 @@ When `server.admin_token` is set, these endpoints are available:
 - `POST /admin/replay-dlq?limit=100`
   - Requires header `X-Admin-Token`.
   - Supports token rotation with `server.admin_token_secondary` (either primary or secondary token is accepted). `admin_token_secondary` requires `admin_token`, and both values must differ.
-  - Optional header `Idempotency-Key` to reuse an existing replay job instead of creating duplicates.
+  - Optional header `Idempotency-Key` to reuse an existing equivalent replay job instead of creating duplicates (`409` if reused with different `limit`/`dry_run` parameters).
   - Optional header `X-Request-ID` (echoed back in `X-Request-ID` response header and `request_id` body field).
   - Error responses are JSON (`{"request_id":"...","error":"..."}`) for consistent automation and audit correlation.
   - Admin endpoints are token-bucket rate-limited (`server.admin_rate_limit_per_sec`, `server.admin_rate_limit_burst`) and return `429` with `Retry-After`.

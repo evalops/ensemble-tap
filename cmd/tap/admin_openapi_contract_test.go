@@ -113,6 +113,7 @@ func TestAdminOpenAPIContractMatchesRuntime(t *testing.T) {
 	replayReq, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:"+intToString(port)+"/admin/replay-dlq?dry_run=true&limit=2", nil)
 	replayReq.Header.Set("X-Admin-Token", "test-admin-token")
 	replayReq.Header.Set("X-Request-ID", "openapi-replay-1")
+	replayReq.Header.Set("Idempotency-Key", "openapi-idem-1")
 	replayBody, _ := validateRoundTrip(replayReq, http.StatusAccepted)
 
 	var replayResp struct {
@@ -126,6 +127,12 @@ func TestAdminOpenAPIContractMatchesRuntime(t *testing.T) {
 	if replayResp.Job.JobID == "" {
 		t.Fatalf("expected replay response to include job_id")
 	}
+
+	replayConflictReq, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:"+intToString(port)+"/admin/replay-dlq?dry_run=false&limit=3", nil)
+	replayConflictReq.Header.Set("X-Admin-Token", "test-admin-token")
+	replayConflictReq.Header.Set("X-Request-ID", "openapi-replay-conflict-1")
+	replayConflictReq.Header.Set("Idempotency-Key", "openapi-idem-1")
+	_, _ = validateRoundTrip(replayConflictReq, http.StatusConflict)
 
 	statusReq, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+intToString(port)+"/admin/replay-dlq/"+replayResp.Job.JobID, nil)
 	statusReq.Header.Set("X-Admin-Token", "test-admin-token")
