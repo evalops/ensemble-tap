@@ -3,7 +3,7 @@ package poller
 import (
 	"context"
 	"errors"
-	"math/rand"
+	rand "math/rand/v2"
 	"time"
 
 	"github.com/cenkalti/backoff/v5"
@@ -54,7 +54,6 @@ func (p *Poller) Start(ctx context.Context) {
 	ticker := time.NewTicker(p.Interval)
 	defer ticker.Stop()
 	failureCount := 0
-	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	for {
 		select {
@@ -69,7 +68,7 @@ func (p *Poller) Start(ctx context.Context) {
 			if err := p.Run(ctx); err != nil {
 				failureCount++
 				wait := nextWaitDuration(err, bo)
-				wait = applyJitter(wait, p.JitterRatio, rnd)
+				wait = applyJitter(wait, p.JitterRatio)
 
 				if failureCount >= p.FailureBudget {
 					if wait < p.CircuitBreakDuration {
@@ -105,11 +104,11 @@ func nextWaitDuration(err error, bo backoff.BackOff) time.Duration {
 	return wait
 }
 
-func applyJitter(wait time.Duration, ratio float64, rnd *rand.Rand) time.Duration {
-	if wait <= 0 || ratio <= 0 || rnd == nil {
+func applyJitter(wait time.Duration, ratio float64) time.Duration {
+	if wait <= 0 || ratio <= 0 {
 		return wait
 	}
-	delta := ratio * (rnd.Float64()*2 - 1) // [-ratio, +ratio]
+	delta := ratio * (rand.Float64()*2 - 1) // #nosec G404 -- jitter scheduling does not require cryptographic randomness.
 	jittered := float64(wait) * (1 + delta)
 	if jittered < float64(10*time.Millisecond) {
 		return 10 * time.Millisecond

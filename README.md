@@ -14,7 +14,9 @@ Ensemble Tap is a standalone Go service that ingests SaaS webhook events, normal
 - NATS JetStream publisher with dedup IDs and optional tenant-scoped subjects.
 - Optional ClickHouse sink consuming from NATS with batched inserts.
 - Dead-letter queue recording for verification/normalization/publish failures.
-- Admin DLQ replay endpoint: `POST /admin/replay-dlq?limit=100` guarded by `X-Admin-Token`, with request validation and max replay cap metadata.
+- Admin DLQ replay endpoints:
+  - `POST /admin/replay-dlq?limit=100` creates async replay jobs (with `dry_run` and idempotency support).
+  - `GET /admin/replay-dlq/{job_id}` fetches replay job status/results.
 - Admin poller runtime status endpoint: `GET /admin/poller-status` guarded by `X-Admin-Token`, with optional `provider` and `tenant` filters.
 - Health and observability endpoints:
   - `GET /livez`
@@ -62,11 +64,17 @@ When `server.admin_token` is set, these endpoints are available:
 - `POST /admin/replay-dlq?limit=100`
   - Requires header `X-Admin-Token`.
   - Supports token rotation with `server.admin_token_secondary` (either primary or secondary token is accepted). `admin_token_secondary` requires `admin_token`, and both values must differ.
+  - Optional header `Idempotency-Key` to reuse an existing replay job instead of creating duplicates.
   - Optional header `X-Request-ID` (echoed back in `X-Request-ID` response header and `request_id` body field).
   - Error responses are JSON (`{"request_id":"...","error":"..."}`) for consistent automation and audit correlation.
   - Admin endpoints are token-bucket rate-limited (`server.admin_rate_limit_per_sec`, `server.admin_rate_limit_burst`) and return `429` with `Retry-After`.
+  - Optional guardrails: CIDR allowlist (`server.admin_allowed_cidrs`) and client-cert requirement (`server.admin_mtls_required`, `server.admin_mtls_client_cert_header`).
   - `limit` must be a positive integer.
-  - Replay is capped by `server.admin_replay_max_limit` (default `2000`, valid range `1..100000`); response includes `requested_limit`, `effective_limit`, `max_limit`, and `capped`. If `limit` is omitted, default replay (`100`) is still capped by `admin_replay_max_limit`.
+  - `dry_run=true` computes replayable count without consuming DLQ entries.
+  - Replay is capped by `server.admin_replay_max_limit` (default `2000`, valid range `1..100000`); accepted response includes replay job metadata (`job_id`, `status`, `effective_limit`, `max_limit`, `capped`, `dry_run`).
+- `GET /admin/replay-dlq/{job_id}`
+  - Requires header `X-Admin-Token`.
+  - Returns current replay job state (`queued`, `running`, `succeeded`, `failed`) and result fields (`replayed`, `error`).
 - `GET /admin/poller-status`
   - Requires header `X-Admin-Token`.
   - Supports token rotation with `server.admin_token_secondary`.
@@ -76,6 +84,7 @@ When `server.admin_token` is set, these endpoints are available:
   - Response includes `count` and per-poller runtime fields (`interval`, rate limiter values, failure budget, circuit-break duration, jitter ratio, last run/success/error details).
   - Structured audit logs are emitted for authorized and unauthorized admin calls (`request_id`, requester IP, user-agent, path/method, and duration).
   - Prometheus metrics include `tap_admin_requests_total{endpoint,outcome}` and `tap_admin_request_duration_seconds{endpoint,outcome}`.
+  - Poller health metrics include `tap_poller_stuck{provider,tenant}` and `tap_poller_consecutive_failures{provider,tenant}`.
 
 ## Admin API Contract
 
@@ -85,7 +94,18 @@ When `server.admin_token` is set, these endpoints are available:
 # Replay DLQ with explicit request id
 curl -i -X POST 'http://localhost:8080/admin/replay-dlq?limit=50' \
   -H 'X-Admin-Token: your-admin-token' \
+  -H 'Idempotency-Key: replay-tenant-a-20260304' \
   -H 'X-Request-ID: replay-manual-001'
+
+# Replay dry-run
+curl -i -X POST 'http://localhost:8080/admin/replay-dlq?limit=200&dry_run=true' \
+  -H 'X-Admin-Token: your-admin-token' \
+  -H 'X-Request-ID: replay-dry-run-001'
+
+# Replay job status
+curl -i 'http://localhost:8080/admin/replay-dlq/replay_1234567890_1' \
+  -H 'X-Admin-Token: your-admin-token' \
+  -H 'X-Request-ID: replay-status-001'
 
 # Poller status (filtered)
 curl -i 'http://localhost:8080/admin/poller-status?provider=hubspot&tenant=tenant-a' \
@@ -110,6 +130,8 @@ See chart-specific usage in `charts/ensemble-tap/README.md`.
 
 ## Release and Operations
 
-- CI workflow validates unit tests, Docker build, Helm chart render/lint, and real NATS+ClickHouse integration.
-- Tag pushes matching `v*` trigger release workflow to publish multi-arch images to GHCR and package the Helm chart.
+- CI workflow validates unit tests, OpenAPI contract/runtime parity, Docker build, Helm chart render/lint, and real NATS+ClickHouse integration.
+- CI security gates run `gosec`, `govulncheck`, Trivy CRITICAL scan, and source SBOM generation.
+- CI performance smoke gate runs a lightweight `k6` probe against `/livez` and `/readyz`.
+- Tag pushes matching `v*` trigger release workflow to publish multi-arch images to GHCR, generate source/image SBOMs, sign image digests with cosign keyless OIDC, and package the Helm chart.
 - Branch protection can be applied with `.github/scripts/apply_branch_protection.sh` or via the manual `Branch Protection` workflow.

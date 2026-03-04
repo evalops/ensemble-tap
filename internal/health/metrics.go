@@ -16,6 +16,8 @@ type Metrics struct {
 	EventsDedupHitsTotal             *prometheus.CounterVec
 	AdminRequestsTotal               *prometheus.CounterVec
 	AdminRequestDurationSeconds      *prometheus.HistogramVec
+	PollerStuck                      *prometheus.GaugeVec
+	PollerConsecutiveFailures        *prometheus.GaugeVec
 	ProviderHealth                   *prometheus.GaugeVec
 	NATSConnected                    prometheus.Gauge
 }
@@ -62,6 +64,14 @@ func NewMetrics() *Metrics {
 				Help:    "Admin endpoint request latency by endpoint and outcome.",
 				Buckets: prometheus.DefBuckets,
 			}, []string{"endpoint", "outcome"}),
+			PollerStuck: promauto.NewGaugeVec(prometheus.GaugeOpts{
+				Name: "tap_poller_stuck",
+				Help: "Poller stuck state (1 stuck, 0 healthy) by provider and tenant.",
+			}, []string{"provider", "tenant"}),
+			PollerConsecutiveFailures: promauto.NewGaugeVec(prometheus.GaugeOpts{
+				Name: "tap_poller_consecutive_failures",
+				Help: "Current consecutive poller failures by provider and tenant.",
+			}, []string{"provider", "tenant"}),
 			ProviderHealth: promauto.NewGaugeVec(prometheus.GaugeOpts{
 				Name: "tap_provider_health",
 				Help: "Provider health state (1 healthy, 0 unhealthy).",

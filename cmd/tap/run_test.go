@@ -21,6 +21,7 @@ import (
 
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
+	"golang.org/x/time/rate"
 
 	"github.com/evalops/ensemble-tap/config"
 	"github.com/evalops/ensemble-tap/internal/dlq"
@@ -254,6 +255,72 @@ func TestAdminRetryAfterSeconds(t *testing.T) {
 	}
 }
 
+func TestAdminRateLimiterRegistryIsCallerScoped(t *testing.T) {
+	registry := newAdminRateLimiterRegistry(rate.Limit(1), 1)
+	if ok, _ := registry.Allow(adminEndpointReplayDLQ, "203.0.113.10", "token-a"); !ok {
+		t.Fatalf("expected first replay request to pass")
+	}
+	if ok, scope := registry.Allow(adminEndpointReplayDLQ, "203.0.113.10", "token-a"); ok || scope != "ip" {
+		t.Fatalf("expected second replay request from same ip to be limited by ip scope, got ok=%v scope=%q", ok, scope)
+	}
+	if ok, _ := registry.Allow(adminEndpointReplayDLQ, "203.0.113.11", "token-b"); !ok {
+		t.Fatalf("expected replay request from a different ip to pass")
+	}
+	if ok, _ := registry.Allow(adminEndpointPollerStatus, "203.0.113.10", "token-a"); !ok {
+		t.Fatalf("expected different endpoint key space to pass")
+	}
+}
+
+func TestAdminAllowlistAndClientCertHelpers(t *testing.T) {
+	cidrs, err := parseAdminAllowedCIDRs([]string{"203.0.113.0/24", "198.51.100.10/32"})
+	if err != nil {
+		t.Fatalf("parse cidrs: %v", err)
+	}
+	if !adminRequesterAllowed("203.0.113.42", cidrs) {
+		t.Fatalf("expected ip in allowlist to be accepted")
+	}
+	if adminRequesterAllowed("192.0.2.5", cidrs) {
+		t.Fatalf("expected ip outside allowlist to be rejected")
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/admin/poller-status", nil)
+	req.Header.Set("X-Forwarded-Client-Cert", "subject=client-a")
+	if !adminHasClientCert(req, "X-Forwarded-Client-Cert") {
+		t.Fatalf("expected forwarded client cert header to satisfy mTLS helper")
+	}
+	if adminHasClientCert(req, "X-Other-Cert") {
+		t.Fatalf("expected missing configured cert header to fail mTLS helper")
+	}
+}
+
+func TestPollerLooksStuck(t *testing.T) {
+	now := time.Now().UTC()
+	if !pollerLooksStuck(pollerStatusSnapshot{
+		Provider:            "notion",
+		Interval:            "10s",
+		FailureBudget:       3,
+		ConsecutiveFailures: 3,
+		LastRunAt:           now,
+	}, now) {
+		t.Fatalf("expected poller at failure budget to be marked stuck")
+	}
+	if !pollerLooksStuck(pollerStatusSnapshot{
+		Provider:      "hubspot",
+		Interval:      "5s",
+		LastRunAt:     now.Add(-25 * time.Second),
+		LastSuccessAt: now.Add(-25 * time.Second),
+	}, now) {
+		t.Fatalf("expected stale poller to be marked stuck")
+	}
+	if pollerLooksStuck(pollerStatusSnapshot{
+		Provider:      "salesforce",
+		Interval:      "30s",
+		LastRunAt:     now.Add(-10 * time.Second),
+		LastSuccessAt: now.Add(-10 * time.Second),
+	}, now) {
+		t.Fatalf("expected recently healthy poller to be unstuck")
+	}
+}
+
 func TestRequesterIP(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/admin/poller-status", nil)
 	req.RemoteAddr = "127.0.0.1:12345"
@@ -458,6 +525,68 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 		t.Fatalf("flush nats connection: %v", err)
 	}
 
+	type replayJobSnapshot struct {
+		JobID          string    `json:"job_id"`
+		Status         string    `json:"status"`
+		RequestedLimit int       `json:"requested_limit"`
+		EffectiveLimit int       `json:"effective_limit"`
+		MaxLimit       int       `json:"max_limit"`
+		Capped         bool      `json:"capped"`
+		DryRun         bool      `json:"dry_run"`
+		CreatedAt      time.Time `json:"created_at"`
+		StartedAt      time.Time `json:"started_at"`
+		CompletedAt    time.Time `json:"completed_at"`
+		Replayed       int       `json:"replayed"`
+		Error          string    `json:"error"`
+	}
+	type replayJobEnvelope struct {
+		RequestID         string            `json:"request_id"`
+		IdempotencyReused bool              `json:"idempotency_reused"`
+		Job               replayJobSnapshot `json:"job"`
+	}
+	readReplayJobEnvelope := func(resp *http.Response) replayJobEnvelope {
+		t.Helper()
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			t.Fatalf("read replay job response body: %v", err)
+		}
+		var out replayJobEnvelope
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatalf("decode replay job response body: %v body=%s", err, string(body))
+		}
+		return out
+	}
+	waitReplayJob := func(token, reqID, jobID string) replayJobSnapshot {
+		t.Helper()
+		statusURL := replayBaseURL + "/" + jobID
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			req, _ := http.NewRequest(http.MethodGet, statusURL, nil)
+			req.Header.Set("X-Admin-Token", token)
+			req.Header.Set("X-Request-ID", reqID)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("request replay status: %v", err)
+			}
+			if resp.StatusCode != http.StatusOK {
+				_ = resp.Body.Close()
+				t.Fatalf("expected replay status 200, got %d", resp.StatusCode)
+			}
+			out := readReplayJobEnvelope(resp)
+			if out.Job.JobID != jobID {
+				t.Fatalf("expected replay status for %q, got %q", jobID, out.Job.JobID)
+			}
+			switch out.Job.Status {
+			case adminReplayJobStatusSucceeded, adminReplayJobStatusFailed:
+				return out.Job
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		t.Fatalf("timed out waiting for replay job %q completion", jobID)
+		return replayJobSnapshot{}
+	}
+
 	reqWithToken, _ := http.NewRequest(http.MethodPost, replayURL, nil)
 	reqWithToken.Header.Set("X-Admin-Token", "test-admin-token")
 	reqWithToken.Header.Set("X-Request-ID", "replay-success-1")
@@ -469,38 +598,23 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 	}
 	if got := strings.TrimSpace(respWithToken.Header.Get("X-Request-ID")); got != "replay-success-1" {
 		_ = respWithToken.Body.Close()
-		t.Fatalf("expected success response to echo request id, got %q", got)
+		t.Fatalf("expected accepted response to echo request id, got %q", got)
 	}
-	if respWithToken.StatusCode != http.StatusOK {
+	if respWithToken.StatusCode != http.StatusAccepted {
 		_ = respWithToken.Body.Close()
-		t.Fatalf("expected 200 with admin token, got %d", respWithToken.StatusCode)
+		t.Fatalf("expected 202 with admin token, got %d", respWithToken.StatusCode)
 	}
-	type replayResponse struct {
-		RequestID      string `json:"request_id"`
-		Replayed       int    `json:"replayed"`
-		RequestedLimit int    `json:"requested_limit"`
-		EffectiveLimit int    `json:"effective_limit"`
-		MaxLimit       int    `json:"max_limit"`
-		Capped         bool   `json:"capped"`
+	accepted := readReplayJobEnvelope(respWithToken)
+	if accepted.RequestID != "replay-success-1" {
+		t.Fatalf("unexpected accepted replay request id: %+v", accepted)
 	}
-	var replayResult replayResponse
-	replayBody, err := io.ReadAll(respWithToken.Body)
-	_ = respWithToken.Body.Close()
-	if err != nil {
-		t.Fatalf("read replay response body: %v", err)
+	if accepted.Job.JobID == "" || accepted.Job.EffectiveLimit != 1 || accepted.Job.MaxLimit != replayMaxLimit {
+		t.Fatalf("unexpected accepted replay job payload: %+v", accepted.Job)
 	}
-	if err := json.Unmarshal(replayBody, &replayResult); err != nil {
-		t.Fatalf("decode replay response body: %v", err)
+	finished := waitReplayJob("test-admin-token", "replay-status-1", accepted.Job.JobID)
+	if finished.Status != adminReplayJobStatusSucceeded || finished.Replayed != 1 {
+		t.Fatalf("unexpected finished replay job: %+v", finished)
 	}
-	if replayResult.Replayed != 1 ||
-		replayResult.RequestID != "replay-success-1" ||
-		replayResult.RequestedLimit != 1 ||
-		replayResult.EffectiveLimit != 1 ||
-		replayResult.MaxLimit != replayMaxLimit ||
-		replayResult.Capped {
-		t.Fatalf("unexpected replay response: %+v", replayResult)
-	}
-
 	got, err := replayedSub.NextMsg(3 * time.Second)
 	if err != nil {
 		t.Fatalf("expected replayed message: %v", err)
@@ -508,6 +622,7 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 	if string(got.Data) != string(payload) {
 		t.Fatalf("unexpected replay payload: %s", string(got.Data))
 	}
+
 	reqWithCap, _ := http.NewRequest(http.MethodPost, replayBaseURL+"?limit=99999", nil)
 	reqWithCap.Header.Set("X-Admin-Token", "next-admin-token")
 	reqWithCap.Header.Set("X-Request-ID", "replay-cap-1")
@@ -519,27 +634,72 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 	}
 	if got := strings.TrimSpace(respWithCap.Header.Get("X-Request-ID")); got != "replay-cap-1" {
 		_ = respWithCap.Body.Close()
-		t.Fatalf("expected capped response to echo request id, got %q", got)
+		t.Fatalf("expected capped accepted response to echo request id, got %q", got)
 	}
-	if respWithCap.StatusCode != http.StatusOK {
+	if respWithCap.StatusCode != http.StatusAccepted {
 		_ = respWithCap.Body.Close()
-		t.Fatalf("expected 200 with capped limit, got %d", respWithCap.StatusCode)
+		t.Fatalf("expected 202 with capped limit, got %d", respWithCap.StatusCode)
 	}
-	var cappedResult replayResponse
-	cappedBody, err := io.ReadAll(respWithCap.Body)
-	_ = respWithCap.Body.Close()
+	cappedAccepted := readReplayJobEnvelope(respWithCap)
+	if cappedAccepted.Job.EffectiveLimit != replayMaxLimit || !cappedAccepted.Job.Capped {
+		t.Fatalf("unexpected capped accepted replay payload: %+v", cappedAccepted.Job)
+	}
+	cappedFinished := waitReplayJob("next-admin-token", "replay-status-cap-1", cappedAccepted.Job.JobID)
+	if cappedFinished.Status != adminReplayJobStatusSucceeded {
+		t.Fatalf("unexpected capped replay job status: %+v", cappedFinished)
+	}
+
+	reqDryRun, _ := http.NewRequest(http.MethodPost, replayBaseURL+"?dry_run=true&limit=10", nil)
+	reqDryRun.Header.Set("X-Admin-Token", "test-admin-token")
+	reqDryRun.Header.Set("X-Request-ID", "replay-dry-1")
+	reqDryRun.Header.Set("Idempotency-Key", "idem-replay-1")
+	respDryRun, err := http.DefaultClient.Do(reqDryRun)
 	if err != nil {
-		t.Fatalf("read capped replay response body: %v", err)
+		t.Fatalf("request replay dry-run: %v", err)
 	}
-	if err := json.Unmarshal(cappedBody, &cappedResult); err != nil {
-		t.Fatalf("decode capped replay response body: %v", err)
+	if respDryRun.StatusCode != http.StatusAccepted {
+		_ = respDryRun.Body.Close()
+		t.Fatalf("expected 202 for dry-run replay, got %d", respDryRun.StatusCode)
 	}
-	if cappedResult.RequestID != "replay-cap-1" ||
-		cappedResult.RequestedLimit != 99999 ||
-		cappedResult.EffectiveLimit != replayMaxLimit ||
-		cappedResult.MaxLimit != replayMaxLimit ||
-		!cappedResult.Capped {
-		t.Fatalf("unexpected capped replay response: %+v", cappedResult)
+	dryRunAccepted := readReplayJobEnvelope(respDryRun)
+	if !dryRunAccepted.Job.DryRun {
+		t.Fatalf("expected dry-run replay job")
+	}
+	reqDryRunReuse, _ := http.NewRequest(http.MethodPost, replayBaseURL+"?dry_run=true&limit=10", nil)
+	reqDryRunReuse.Header.Set("X-Admin-Token", "test-admin-token")
+	reqDryRunReuse.Header.Set("X-Request-ID", "replay-dry-2")
+	reqDryRunReuse.Header.Set("Idempotency-Key", "idem-replay-1")
+	respDryRunReuse, err := http.DefaultClient.Do(reqDryRunReuse)
+	if err != nil {
+		t.Fatalf("request replay dry-run idempotency reuse: %v", err)
+	}
+	if respDryRunReuse.StatusCode != http.StatusOK {
+		_ = respDryRunReuse.Body.Close()
+		t.Fatalf("expected 200 for idempotency reuse, got %d", respDryRunReuse.StatusCode)
+	}
+	dryRunReused := readReplayJobEnvelope(respDryRunReuse)
+	if !dryRunReused.IdempotencyReused || dryRunReused.Job.JobID != dryRunAccepted.Job.JobID {
+		t.Fatalf("expected reused dry-run job, got %+v", dryRunReused)
+	}
+	dryRunFinished := waitReplayJob("test-admin-token", "replay-status-dry-1", dryRunAccepted.Job.JobID)
+	if dryRunFinished.Status != adminReplayJobStatusSucceeded || !dryRunFinished.DryRun {
+		t.Fatalf("unexpected dry-run replay job completion: %+v", dryRunFinished)
+	}
+
+	reqMissingStatus, _ := http.NewRequest(http.MethodGet, replayBaseURL+"/missing-job-id", nil)
+	reqMissingStatus.Header.Set("X-Admin-Token", "test-admin-token")
+	reqMissingStatus.Header.Set("X-Request-ID", "replay-status-missing-1")
+	respMissingStatus, err := http.DefaultClient.Do(reqMissingStatus)
+	if err != nil {
+		t.Fatalf("request replay missing status: %v", err)
+	}
+	if respMissingStatus.StatusCode != http.StatusNotFound {
+		_ = respMissingStatus.Body.Close()
+		t.Fatalf("expected 404 for missing replay job, got %d", respMissingStatus.StatusCode)
+	}
+	missingStatusErr := readAdminError(respMissingStatus)
+	if missingStatusErr.RequestID != "replay-status-missing-1" || !strings.Contains(missingStatusErr.Error, "not found") {
+		t.Fatalf("unexpected missing replay status payload: %+v", missingStatusErr)
 	}
 	logEntries := parseJSONLogEntries(t, logBuf.String())
 	if _, ok := findLogEntry(logEntries, "admin request unauthorized", func(entry map[string]any) bool {
@@ -578,33 +738,33 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 	}); !ok {
 		t.Fatalf("expected rejected replay audit log with request metadata; logs=%s", logBuf.String())
 	}
-	replayLog, ok := findLogEntry(logEntries, "admin replay dlq completed", func(entry map[string]any) bool {
+	replayLog, ok := findLogEntry(logEntries, "admin replay dlq accepted", func(entry map[string]any) bool {
 		path, okPath := entry["path"].(string)
 		method, okMethod := entry["method"].(string)
 		requestID, okRequestID := entry["request_id"].(string)
 		requested, okRequested := logFieldInt(entry, "requested_limit")
 		effective, okEffective := logFieldInt(entry, "effective_limit")
-		replayed, okReplayed := logFieldInt(entry, "replayed_count")
 		ip, okIP := entry["requester_ip"].(string)
 		userAgent, okUA := entry["user_agent"].(string)
+		dryRun, okDryRun := entry["dry_run"].(bool)
 		capped, okCapped := entry["capped"].(bool)
 		durationMS, okDuration := logFieldInt(entry, "duration_ms")
-		return okPath && okMethod && okRequestID && okRequested && okEffective && okReplayed && okIP && okUA && okCapped && okDuration &&
+		return okPath && okMethod && okRequestID && okRequested && okEffective && okIP && okUA && okDryRun && okCapped && okDuration &&
 			path == "/admin/replay-dlq" &&
 			method == http.MethodPost &&
 			requestID == "replay-success-1" &&
 			requested == 1 &&
 			effective == 1 &&
-			replayed == 1 &&
 			ip == "203.0.113.52" &&
 			userAgent == "tap-admin-test/success" &&
+			!dryRun &&
 			!capped &&
 			durationMS >= 0
 	})
 	if !ok {
-		t.Fatalf("expected replay audit log with requester ip/effective limit/replayed count; logs=%s", logBuf.String())
+		t.Fatalf("expected replay acceptance audit log with requester ip/effective limit; logs=%s", logBuf.String())
 	}
-	if _, ok := findLogEntry(logEntries, "admin replay dlq completed", func(entry map[string]any) bool {
+	if _, ok := findLogEntry(logEntries, "admin replay dlq accepted", func(entry map[string]any) bool {
 		requestID, okRequestID := entry["request_id"].(string)
 		effective, okEffective := logFieldInt(entry, "effective_limit")
 		capped, okCapped := entry["capped"].(bool)
@@ -617,7 +777,13 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 			capped &&
 			durationMS >= 0
 	}); !ok {
-		t.Fatalf("expected capped replay completion audit log; logs=%s", logBuf.String())
+		t.Fatalf("expected capped replay acceptance audit log; logs=%s", logBuf.String())
+	}
+	if _, ok := findLogEntry(logEntries, "admin replay dlq idempotency reused", func(entry map[string]any) bool {
+		requestID, okRequestID := entry["request_id"].(string)
+		return okRequestID && requestID == "replay-dry-2"
+	}); !ok {
+		t.Fatalf("expected replay idempotency reuse audit log; logs=%s", logBuf.String())
 	}
 	if _, exists := replayLog["requester_ip"]; !exists {
 		t.Fatalf("expected replay audit log to include requester_ip")
@@ -634,11 +800,19 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 	assertMetricAtLeast(t, metricsText, "tap_admin_requests_total", map[string]string{
 		"endpoint": adminEndpointReplayDLQ,
 		"outcome":  adminOutcomeSuccess,
-	}, 2)
+	}, 3)
+	assertMetricAtLeast(t, metricsText, "tap_admin_requests_total", map[string]string{
+		"endpoint": adminEndpointReplayStatus,
+		"outcome":  adminOutcomeSuccess,
+	}, 1)
+	assertMetricAtLeast(t, metricsText, "tap_admin_requests_total", map[string]string{
+		"endpoint": adminEndpointReplayStatus,
+		"outcome":  adminOutcomeNotFound,
+	}, 1)
 	assertMetricAtLeast(t, metricsText, "tap_admin_request_duration_seconds_count", map[string]string{
 		"endpoint": adminEndpointReplayDLQ,
 		"outcome":  adminOutcomeSuccess,
-	}, 2)
+	}, 3)
 
 	cancel()
 	select {
@@ -927,6 +1101,312 @@ func TestRunAdminPollerStatusEndpoint(t *testing.T) {
 		"endpoint": adminEndpointPollerStatus,
 		"outcome":  adminOutcomeSuccess,
 	}, 1)
+	assertMetricAtLeast(t, metricsText, "tap_poller_consecutive_failures", map[string]string{
+		"provider": "notion",
+		"tenant":   "tenant-ops",
+	}, 0)
+	assertMetricAtLeast(t, metricsText, "tap_poller_stuck", map[string]string{
+		"provider": "notion",
+		"tenant":   "tenant-ops",
+	}, 0)
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("run returned error: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("run did not stop after cancel")
+	}
+}
+
+func TestRunAdminReplayEndpointAllowlistAndMTLS(t *testing.T) {
+	s := runNATSServer(t)
+	port := freePort(t)
+	cfg := config.Config{
+		NATS: config.NATSConfig{
+			URL:           s.ClientURL(),
+			Stream:        "ENSEMBLE_TAP_CMD_TEST_ADMIN_MTLS",
+			SubjectPrefix: "ensemble.tap",
+			MaxAge:        time.Hour,
+			DedupWindow:   time.Minute,
+		},
+		Server: config.ServerConfig{
+			Port:                      port,
+			BasePath:                  "/webhooks",
+			MaxBodySize:               1 << 20,
+			AdminToken:                "test-admin-token",
+			AdminAllowedCIDRs:         []string{"203.0.113.0/24"},
+			AdminMTLSRequired:         true,
+			AdminMTLSClientCertHeader: "X-Client-Cert",
+		},
+	}
+	cfg.ApplyDefaults()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- run(ctx, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}()
+
+	readyURL := "http://127.0.0.1:" + intToString(port) + "/readyz"
+	if err := waitForStatusOrError(readyURL, http.StatusOK, 10*time.Second, errCh); err != nil {
+		t.Fatalf("ready endpoint never became healthy: %v", err)
+	}
+	replayURL := "http://127.0.0.1:" + intToString(port) + "/admin/replay-dlq?dry_run=true&limit=1"
+
+	readErr := func(resp *http.Response) string {
+		t.Helper()
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			t.Fatalf("read admin error body: %v", err)
+		}
+		var out struct {
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatalf("decode admin error body: %v body=%s", err, string(body))
+		}
+		return out.Error
+	}
+
+	reqCIDRBlocked, _ := http.NewRequest(http.MethodPost, replayURL, nil)
+	reqCIDRBlocked.Header.Set("X-Request-ID", "replay-cidr-1")
+	reqCIDRBlocked.Header.Set("X-Admin-Token", "test-admin-token")
+	reqCIDRBlocked.Header.Set("X-Forwarded-For", "198.51.100.20")
+	respCIDRBlocked, err := http.DefaultClient.Do(reqCIDRBlocked)
+	if err != nil {
+		t.Fatalf("request replay from blocked cidr: %v", err)
+	}
+	if respCIDRBlocked.StatusCode != http.StatusForbidden {
+		_ = respCIDRBlocked.Body.Close()
+		t.Fatalf("expected blocked cidr status 403, got %d", respCIDRBlocked.StatusCode)
+	}
+	if got := readErr(respCIDRBlocked); got != "forbidden" {
+		t.Fatalf("unexpected blocked cidr error %q", got)
+	}
+
+	reqMTLSMissing, _ := http.NewRequest(http.MethodPost, replayURL, nil)
+	reqMTLSMissing.Header.Set("X-Request-ID", "replay-mtls-1")
+	reqMTLSMissing.Header.Set("X-Admin-Token", "test-admin-token")
+	reqMTLSMissing.Header.Set("X-Forwarded-For", "203.0.113.22")
+	respMTLSMissing, err := http.DefaultClient.Do(reqMTLSMissing)
+	if err != nil {
+		t.Fatalf("request replay with missing mTLS: %v", err)
+	}
+	if respMTLSMissing.StatusCode != http.StatusForbidden {
+		_ = respMTLSMissing.Body.Close()
+		t.Fatalf("expected missing mTLS status 403, got %d", respMTLSMissing.StatusCode)
+	}
+	if got := readErr(respMTLSMissing); !strings.Contains(strings.ToLower(got), "mTLS") && !strings.Contains(strings.ToLower(got), "certificate") {
+		t.Fatalf("unexpected missing mTLS error %q", got)
+	}
+
+	reqTokenMissing, _ := http.NewRequest(http.MethodPost, replayURL, nil)
+	reqTokenMissing.Header.Set("X-Request-ID", "replay-auth-1")
+	reqTokenMissing.Header.Set("X-Forwarded-For", "203.0.113.23")
+	reqTokenMissing.Header.Set("X-Client-Cert", "subject=client-a")
+	respTokenMissing, err := http.DefaultClient.Do(reqTokenMissing)
+	if err != nil {
+		t.Fatalf("request replay with missing token: %v", err)
+	}
+	if respTokenMissing.StatusCode != http.StatusUnauthorized {
+		_ = respTokenMissing.Body.Close()
+		t.Fatalf("expected missing token status 401, got %d", respTokenMissing.StatusCode)
+	}
+
+	reqAllowed, _ := http.NewRequest(http.MethodPost, replayURL, nil)
+	reqAllowed.Header.Set("X-Request-ID", "replay-ok-1")
+	reqAllowed.Header.Set("X-Forwarded-For", "203.0.113.24")
+	reqAllowed.Header.Set("X-Client-Cert", "subject=client-a")
+	reqAllowed.Header.Set("X-Admin-Token", "test-admin-token")
+	respAllowed, err := http.DefaultClient.Do(reqAllowed)
+	if err != nil {
+		t.Fatalf("request replay with allowlist+mTLS+token: %v", err)
+	}
+	if respAllowed.StatusCode != http.StatusAccepted {
+		_ = respAllowed.Body.Close()
+		t.Fatalf("expected accepted status 202, got %d", respAllowed.StatusCode)
+	}
+	_, _ = io.Copy(io.Discard, respAllowed.Body)
+	_ = respAllowed.Body.Close()
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("run returned error: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatalf("run did not stop after cancel")
+	}
+}
+
+func TestRunAdminReplayUnderContention(t *testing.T) {
+	s := runNATSServer(t)
+	port := freePort(t)
+	cfg := config.Config{
+		NATS: config.NATSConfig{
+			URL:           s.ClientURL(),
+			Stream:        "ENSEMBLE_TAP_CMD_TEST_REPLAY_CONTENTION",
+			SubjectPrefix: "ensemble.tap",
+			MaxAge:        time.Hour,
+			DedupWindow:   time.Minute,
+		},
+		Server: config.ServerConfig{
+			Port:                 port,
+			BasePath:             "/webhooks",
+			MaxBodySize:          1 << 20,
+			AdminToken:           "test-admin-token",
+			AdminRateLimitPerSec: 200,
+			AdminRateLimitBurst:  200,
+		},
+	}
+	cfg.ApplyDefaults()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- run(ctx, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}()
+
+	readyURL := "http://127.0.0.1:" + intToString(port) + "/readyz"
+	if err := waitForStatusOrError(readyURL, http.StatusOK, 10*time.Second, errCh); err != nil {
+		t.Fatalf("ready endpoint never became healthy: %v", err)
+	}
+
+	nc, err := nats.Connect(s.ClientURL())
+	if err != nil {
+		t.Fatalf("connect nats: %v", err)
+	}
+	defer nc.Close()
+	js, err := nc.JetStream()
+	if err != nil {
+		t.Fatalf("jetstream context: %v", err)
+	}
+	for i := 0; i < 10; i++ {
+		rec := dlq.Record{
+			Stage:           "publish",
+			Provider:        "test",
+			Reason:          "contention replay test",
+			OriginalSubject: "ensemble.tap.replay.contention.updated",
+			OriginalDedupID: fmt.Sprintf("contention_%d", i),
+			OriginalPayload: []byte(fmt.Sprintf(`{"id":"contention_%d"}`, i)),
+		}
+		data, err := json.Marshal(rec)
+		if err != nil {
+			t.Fatalf("marshal dlq record: %v", err)
+		}
+		msg := &nats.Msg{
+			Subject: "ensemble.dlq.publish.test",
+			Data:    data,
+			Header:  nats.Header{},
+		}
+		msg.Header.Set(nats.MsgIdHdr, fmt.Sprintf("dlq_contention_%d", i))
+		if _, err := js.PublishMsg(msg); err != nil {
+			t.Fatalf("publish dlq message %d: %v", i, err)
+		}
+	}
+
+	type replayJobSnapshot struct {
+		JobID    string `json:"job_id"`
+		Status   string `json:"status"`
+		Replayed int    `json:"replayed"`
+		Error    string `json:"error"`
+	}
+	type replayJobEnvelope struct {
+		Job replayJobSnapshot `json:"job"`
+	}
+	readReplayJob := func(resp *http.Response) replayJobEnvelope {
+		t.Helper()
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			t.Fatalf("read replay response body: %v", err)
+		}
+		var out replayJobEnvelope
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatalf("decode replay response body: %v body=%s", err, string(body))
+		}
+		return out
+	}
+	waitJob := func(jobID string) replayJobSnapshot {
+		t.Helper()
+		statusURL := "http://127.0.0.1:" + intToString(port) + "/admin/replay-dlq/" + jobID
+		deadline := time.Now().Add(8 * time.Second)
+		for time.Now().Before(deadline) {
+			req, _ := http.NewRequest(http.MethodGet, statusURL, nil)
+			req.Header.Set("X-Admin-Token", "test-admin-token")
+			req.Header.Set("X-Forwarded-For", "203.0.113.88")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("request replay status: %v", err)
+			}
+			if resp.StatusCode != http.StatusOK {
+				_ = resp.Body.Close()
+				t.Fatalf("expected replay status 200, got %d", resp.StatusCode)
+			}
+			out := readReplayJob(resp)
+			if out.Job.Status == adminReplayJobStatusSucceeded || out.Job.Status == adminReplayJobStatusFailed {
+				return out.Job
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		t.Fatalf("timed out waiting for replay job %q", jobID)
+		return replayJobSnapshot{}
+	}
+
+	jobIDs := make(chan string, 4)
+	errs := make(chan error, 4)
+	for i := 0; i < 4; i++ {
+		go func(i int) {
+			req, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:"+intToString(port)+"/admin/replay-dlq?limit=2", nil)
+			req.Header.Set("X-Admin-Token", "test-admin-token")
+			req.Header.Set("X-Forwarded-For", fmt.Sprintf("203.0.113.%d", 90+i))
+			req.Header.Set("X-Request-ID", fmt.Sprintf("replay-contention-%d", i))
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if resp.StatusCode != http.StatusAccepted {
+				body, _ := io.ReadAll(resp.Body)
+				_ = resp.Body.Close()
+				errs <- fmt.Errorf("unexpected status %d body=%s", resp.StatusCode, string(body))
+				return
+			}
+			out := readReplayJob(resp)
+			if out.Job.JobID == "" {
+				errs <- fmt.Errorf("missing job id in contention response")
+				return
+			}
+			jobIDs <- out.Job.JobID
+			errs <- nil
+		}(i)
+	}
+	for i := 0; i < 4; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("submit contention replay job: %v", err)
+		}
+	}
+
+	totalReplayed := 0
+	for i := 0; i < 4; i++ {
+		jobID := <-jobIDs
+		job := waitJob(jobID)
+		if job.Status == adminReplayJobStatusSucceeded {
+			totalReplayed += job.Replayed
+		}
+	}
+	if totalReplayed == 0 {
+		t.Fatalf("expected at least one replayed event across contention jobs")
+	}
 
 	cancel()
 	select {
@@ -1015,7 +1495,7 @@ func TestRunAdminEndpointsRateLimited(t *testing.T) {
 
 	reqReplayLimited, _ := http.NewRequest(http.MethodPost, replayURL, nil)
 	reqReplayLimited.Header.Set("X-Request-ID", "rate-replay-2")
-	reqReplayLimited.Header.Set("X-Forwarded-For", "203.0.113.72")
+	reqReplayLimited.Header.Set("X-Forwarded-For", "203.0.113.71")
 	respReplayLimited, err := http.DefaultClient.Do(reqReplayLimited)
 	if err != nil {
 		t.Fatalf("request replay expected rate-limit: %v", err)

@@ -123,6 +123,9 @@ server:
   admin_replay_max_limit: 2000
   admin_rate_limit_per_sec: 5
   admin_rate_limit_burst: 20
+  admin_allowed_cidrs: []
+  admin_mtls_required: false
+  admin_mtls_client_cert_header: X-Forwarded-Client-Cert
 
 state:
   backend: sqlite

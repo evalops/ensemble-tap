@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,12 +41,20 @@ const (
 	maxReplayDLQLimit     = 2000
 
 	adminEndpointReplayDLQ    = "replay_dlq"
+	adminEndpointReplayStatus = "replay_dlq_status"
 	adminEndpointPollerStatus = "poller_status"
 	adminOutcomeSuccess       = "success"
 	adminOutcomeUnauthorized  = "unauthorized"
+	adminOutcomeForbidden     = "forbidden"
+	adminOutcomeNotFound      = "not_found"
 	adminOutcomeRateLimited   = "rate_limited"
 	adminOutcomeBadRequest    = "bad_request"
 	adminOutcomeInternalError = "error"
+
+	adminReplayJobStatusQueued    = "queued"
+	adminReplayJobStatusRunning   = "running"
+	adminReplayJobStatusSucceeded = "succeeded"
+	adminReplayJobStatusFailed    = "failed"
 )
 
 func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
@@ -90,6 +99,7 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 
 	pollerStatuses := newPollerStatusRegistry()
 	startConfiguredPollers(ctx, cfg, publisher, dlqPublisher, logger, checkpointStore, snapshotStore, pollerStatuses)
+	startPollerHealthMonitor(ctx, pollerStatuses, metrics)
 
 	ingressServer := ingress.NewServer(cfg, publisher, metrics, logger)
 	ingressServer.SetDLQRecorder(dlqPublisher)
@@ -118,22 +128,63 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		if adminRateLimitBurst <= 0 {
 			adminRateLimitBurst = 1
 		}
-		retryAfterSeconds := adminRetryAfterSeconds(adminRateLimitPerSec)
-		adminLimiters := map[string]*rate.Limiter{
-			adminEndpointReplayDLQ:    rate.NewLimiter(rate.Limit(adminRateLimitPerSec), adminRateLimitBurst),
-			adminEndpointPollerStatus: rate.NewLimiter(rate.Limit(adminRateLimitPerSec), adminRateLimitBurst),
+		adminAllowedCIDRs, err := parseAdminAllowedCIDRs(cfg.Server.AdminAllowedCIDRs)
+		if err != nil {
+			return fmt.Errorf("parse admin allowlist: %w", err)
 		}
+		adminMTLSRequired := cfg.Server.AdminMTLSRequired
+		adminMTLSClientCertHeader := strings.TrimSpace(cfg.Server.AdminMTLSClientCertHeader)
+		retryAfterSeconds := adminRetryAfterSeconds(adminRateLimitPerSec)
+		adminLimiters := newAdminRateLimiterRegistry(rate.Limit(adminRateLimitPerSec), adminRateLimitBurst)
+		replayJobs := newAdminReplayJobRegistry(512, 24*time.Hour)
 		observeAdmin := func(endpoint, outcome string, startedAt time.Time) {
 			metrics.AdminRequestsTotal.WithLabelValues(endpoint, outcome).Inc()
 			metrics.AdminRequestDurationSeconds.WithLabelValues(endpoint, outcome).Observe(time.Since(startedAt).Seconds())
 		}
-		requireAdminToken := func(endpoint string, w http.ResponseWriter, r *http.Request) (string, string, bool) {
+		type adminAccess struct {
+			RequestID string
+			TokenSlot string
+			UserAgent string
+			RequestIP string
+		}
+		requireAdminAccess := func(endpoint string, w http.ResponseWriter, r *http.Request) (adminAccess, bool) {
 			reqID := requestID(r)
 			userAgent := strings.TrimSpace(r.UserAgent())
 			requestIP := requesterIP(r)
 			w.Header().Set("X-Request-ID", reqID)
 			startedAt := time.Now()
-			if limiter, ok := adminLimiters[endpoint]; ok && !limiter.Allow() {
+			if len(adminAllowedCIDRs) > 0 && !adminRequesterAllowed(requestIP, adminAllowedCIDRs) {
+				observeAdmin(endpoint, adminOutcomeForbidden, startedAt)
+				logger.Warn("admin request forbidden",
+					"path", r.URL.Path,
+					"method", r.Method,
+					"endpoint", endpoint,
+					"request_id", reqID,
+					"requester_ip", requestIP,
+					"user_agent", userAgent,
+					"reason", "cidr_allowlist_miss",
+					"duration_ms", time.Since(startedAt).Milliseconds(),
+				)
+				writeAdminError(w, http.StatusForbidden, reqID, "forbidden")
+				return adminAccess{}, false
+			}
+			if adminMTLSRequired && !adminHasClientCert(r, adminMTLSClientCertHeader) {
+				observeAdmin(endpoint, adminOutcomeForbidden, startedAt)
+				logger.Warn("admin request forbidden",
+					"path", r.URL.Path,
+					"method", r.Method,
+					"endpoint", endpoint,
+					"request_id", reqID,
+					"requester_ip", requestIP,
+					"user_agent", userAgent,
+					"reason", "mtls_required",
+					"duration_ms", time.Since(startedAt).Milliseconds(),
+				)
+				writeAdminError(w, http.StatusForbidden, reqID, "mTLS client certificate required")
+				return adminAccess{}, false
+			}
+			tokenHeader := strings.TrimSpace(r.Header.Get("X-Admin-Token"))
+			if ok, scope := adminLimiters.Allow(endpoint, requestIP, tokenHeader); !ok {
 				observeAdmin(endpoint, adminOutcomeRateLimited, startedAt)
 				w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
 				logger.Warn("admin request rate limited",
@@ -143,13 +194,14 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 					"request_id", reqID,
 					"requester_ip", requestIP,
 					"user_agent", userAgent,
+					"limit_scope", scope,
 					"retry_after_seconds", retryAfterSeconds,
 					"duration_ms", time.Since(startedAt).Milliseconds(),
 				)
 				writeAdminError(w, http.StatusTooManyRequests, reqID, "rate limit exceeded")
-				return reqID, "", false
+				return adminAccess{}, false
 			}
-			authorized, tokenSlot := authorizeAdminToken(strings.TrimSpace(r.Header.Get("X-Admin-Token")), adminToken, adminTokenSecondary)
+			authorized, tokenSlot := authorizeAdminToken(tokenHeader, adminToken, adminTokenSecondary)
 			if !authorized {
 				observeAdmin(endpoint, adminOutcomeUnauthorized, startedAt)
 				logger.Warn("admin request unauthorized",
@@ -162,19 +214,22 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 					"duration_ms", time.Since(startedAt).Milliseconds(),
 				)
 				writeAdminError(w, http.StatusUnauthorized, reqID, "unauthorized")
-				return reqID, "", false
+				return adminAccess{}, false
 			}
-			return reqID, tokenSlot, true
+			return adminAccess{
+				RequestID: reqID,
+				TokenSlot: tokenSlot,
+				UserAgent: userAgent,
+				RequestIP: requestIP,
+			}, true
 		}
 
 		mux.HandleFunc("POST /admin/replay-dlq", func(w http.ResponseWriter, r *http.Request) {
-			reqID, tokenSlot, ok := requireAdminToken(adminEndpointReplayDLQ, w, r)
+			access, ok := requireAdminAccess(adminEndpointReplayDLQ, w, r)
 			if !ok {
 				return
 			}
 			startedAt := time.Now()
-			userAgent := strings.TrimSpace(r.UserAgent())
-			requestIP := requesterIP(r)
 			requestedLimit, limit, capped, err := parseReplayDLQLimit(r.URL.Query().Get("limit"), adminReplayMaxLimit)
 			if err != nil {
 				observeAdmin(adminEndpointReplayDLQ, adminOutcomeBadRequest, startedAt)
@@ -182,82 +237,179 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 					"path", r.URL.Path,
 					"method", r.Method,
 					"endpoint", adminEndpointReplayDLQ,
-					"request_id", reqID,
-					"token_slot", tokenSlot,
-					"requester_ip", requestIP,
-					"user_agent", userAgent,
+					"request_id", access.RequestID,
+					"token_slot", access.TokenSlot,
+					"requester_ip", access.RequestIP,
+					"user_agent", access.UserAgent,
 					"requested_limit_raw", strings.TrimSpace(r.URL.Query().Get("limit")),
 					"error", err.Error(),
 					"duration_ms", time.Since(startedAt).Milliseconds(),
 				)
-				writeAdminError(w, http.StatusBadRequest, reqID, err.Error())
+				writeAdminError(w, http.StatusBadRequest, access.RequestID, err.Error())
 				return
 			}
-			replayed, err := dlqPublisher.Replay(r.Context(), limit, func(ctx context.Context, subject string, payload []byte, dedupID string) error {
-				return publisher.PublishRaw(ctx, subject, payload, dedupID)
-			})
+			dryRun, err := parseOptionalBool(r.URL.Query().Get("dry_run"), false)
 			if err != nil {
-				observeAdmin(adminEndpointReplayDLQ, adminOutcomeInternalError, startedAt)
-				logger.Error("admin replay dlq failed",
+				observeAdmin(adminEndpointReplayDLQ, adminOutcomeBadRequest, startedAt)
+				logger.Warn("admin replay dlq rejected",
 					"path", r.URL.Path,
 					"method", r.Method,
 					"endpoint", adminEndpointReplayDLQ,
-					"request_id", reqID,
-					"token_slot", tokenSlot,
-					"requester_ip", requestIP,
-					"user_agent", userAgent,
-					"requested_limit", requestedLimit,
-					"effective_limit", limit,
-					"capped", capped,
+					"request_id", access.RequestID,
+					"token_slot", access.TokenSlot,
+					"requester_ip", access.RequestIP,
+					"user_agent", access.UserAgent,
+					"dry_run_raw", strings.TrimSpace(r.URL.Query().Get("dry_run")),
 					"error", err.Error(),
 					"duration_ms", time.Since(startedAt).Milliseconds(),
 				)
-				writeAdminError(w, http.StatusInternalServerError, reqID, err.Error())
+				writeAdminError(w, http.StatusBadRequest, access.RequestID, err.Error())
 				return
 			}
+			idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+			if idempotencyKey != "" {
+				if existing, found := replayJobs.GetByIdempotencyKey(idempotencyKey); found {
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"request_id":         access.RequestID,
+						"idempotency_reused": true,
+						"job":                existing,
+					})
+					observeAdmin(adminEndpointReplayDLQ, adminOutcomeSuccess, startedAt)
+					logger.Info("admin replay dlq idempotency reused",
+						"path", r.URL.Path,
+						"method", r.Method,
+						"endpoint", adminEndpointReplayDLQ,
+						"request_id", access.RequestID,
+						"token_slot", access.TokenSlot,
+						"requester_ip", access.RequestIP,
+						"user_agent", access.UserAgent,
+						"job_id", existing.JobID,
+						"duration_ms", time.Since(startedAt).Milliseconds(),
+					)
+					return
+				}
+			}
+			job := replayJobs.Create(adminReplayJobSnapshot{
+				RequestedLimit: requestedLimit,
+				EffectiveLimit: limit,
+				MaxLimit:       adminReplayMaxLimit,
+				Capped:         capped,
+				DryRun:         dryRun,
+			}, idempotencyKey)
+			go func(jobID string, limit int, dryRun bool, tokenSlot, requestIP string) {
+				replayJobs.MarkRunning(jobID)
+				if dryRun {
+					pending, err := dlqPublisher.Pending()
+					if err != nil {
+						replayJobs.MarkFailed(jobID, err.Error())
+						logger.Error("admin replay dlq dry-run failed", "job_id", jobID, "token_slot", tokenSlot, "requester_ip", requestIP, "error", err.Error())
+						return
+					}
+					wouldReplay := pending
+					if wouldReplay > limit {
+						wouldReplay = limit
+					}
+					replayJobs.MarkSucceeded(jobID, wouldReplay)
+					logger.Info("admin replay dlq dry-run completed", "job_id", jobID, "token_slot", tokenSlot, "requester_ip", requestIP, "would_replay", wouldReplay)
+					return
+				}
+				replayed, err := dlqPublisher.Replay(ctx, limit, func(ctx context.Context, subject string, payload []byte, dedupID string) error {
+					return publisher.PublishRaw(ctx, subject, payload, dedupID)
+				})
+				if err != nil {
+					replayJobs.MarkFailed(jobID, err.Error())
+					logger.Error("admin replay dlq job failed", "job_id", jobID, "token_slot", tokenSlot, "requester_ip", requestIP, "error", err.Error())
+					return
+				}
+				replayJobs.MarkSucceeded(jobID, replayed)
+				logger.Info("admin replay dlq job completed", "job_id", jobID, "token_slot", tokenSlot, "requester_ip", requestIP, "replayed_count", replayed)
+			}(job.JobID, limit, dryRun, access.TokenSlot, access.RequestIP)
+
 			w.Header().Set("Content-Type", "application/json")
-			response := map[string]any{
-				"request_id":      reqID,
-				"replayed":        replayed,
-				"effective_limit": limit,
-				"max_limit":       adminReplayMaxLimit,
-				"capped":          capped,
-			}
-			if requestedLimit > 0 {
-				response["requested_limit"] = requestedLimit
-			}
-			_ = json.NewEncoder(w).Encode(response)
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"request_id": access.RequestID,
+				"job":        job,
+			})
 			observeAdmin(adminEndpointReplayDLQ, adminOutcomeSuccess, startedAt)
-			logger.Info("admin replay dlq completed",
+			logger.Info("admin replay dlq accepted",
 				"path", r.URL.Path,
 				"method", r.Method,
 				"endpoint", adminEndpointReplayDLQ,
-				"request_id", reqID,
-				"token_slot", tokenSlot,
-				"requester_ip", requestIP,
-				"user_agent", userAgent,
+				"request_id", access.RequestID,
+				"token_slot", access.TokenSlot,
+				"requester_ip", access.RequestIP,
+				"user_agent", access.UserAgent,
+				"job_id", job.JobID,
 				"requested_limit", requestedLimit,
 				"effective_limit", limit,
+				"dry_run", dryRun,
 				"capped", capped,
-				"replayed_count", replayed,
 				"duration_ms", time.Since(startedAt).Milliseconds(),
 			)
 		})
-		mux.HandleFunc("GET /admin/poller-status", func(w http.ResponseWriter, r *http.Request) {
-			reqID, tokenSlot, ok := requireAdminToken(adminEndpointPollerStatus, w, r)
+		mux.HandleFunc("GET /admin/replay-dlq/{job_id}", func(w http.ResponseWriter, r *http.Request) {
+			access, ok := requireAdminAccess(adminEndpointReplayStatus, w, r)
 			if !ok {
 				return
 			}
 			startedAt := time.Now()
-			userAgent := strings.TrimSpace(r.UserAgent())
-			requestIP := requesterIP(r)
+			jobID := strings.TrimSpace(r.PathValue("job_id"))
+			if jobID == "" {
+				observeAdmin(adminEndpointReplayStatus, adminOutcomeBadRequest, startedAt)
+				writeAdminError(w, http.StatusBadRequest, access.RequestID, "job_id is required")
+				return
+			}
+			job, found := replayJobs.Get(jobID)
+			if !found {
+				observeAdmin(adminEndpointReplayStatus, adminOutcomeNotFound, startedAt)
+				logger.Warn("admin replay dlq status missing",
+					"path", r.URL.Path,
+					"method", r.Method,
+					"endpoint", adminEndpointReplayStatus,
+					"request_id", access.RequestID,
+					"token_slot", access.TokenSlot,
+					"requester_ip", access.RequestIP,
+					"user_agent", access.UserAgent,
+					"job_id", jobID,
+					"duration_ms", time.Since(startedAt).Milliseconds(),
+				)
+				writeAdminError(w, http.StatusNotFound, access.RequestID, "replay job not found")
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"request_id": access.RequestID,
+				"job":        job,
+			})
+			observeAdmin(adminEndpointReplayStatus, adminOutcomeSuccess, startedAt)
+			logger.Info("admin replay dlq status fetched",
+				"path", r.URL.Path,
+				"method", r.Method,
+				"endpoint", adminEndpointReplayStatus,
+				"request_id", access.RequestID,
+				"token_slot", access.TokenSlot,
+				"requester_ip", access.RequestIP,
+				"user_agent", access.UserAgent,
+				"job_id", jobID,
+				"status", job.Status,
+				"duration_ms", time.Since(startedAt).Milliseconds(),
+			)
+		})
+		mux.HandleFunc("GET /admin/poller-status", func(w http.ResponseWriter, r *http.Request) {
+			access, ok := requireAdminAccess(adminEndpointPollerStatus, w, r)
+			if !ok {
+				return
+			}
+			startedAt := time.Now()
 			providerFilter := strings.TrimSpace(r.URL.Query().Get("provider"))
 			tenantFilter := strings.TrimSpace(r.URL.Query().Get("tenant"))
 			statuses := pollerStatuses.SnapshotFiltered(providerFilter, tenantFilter)
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"generated_at": time.Now().UTC(),
-				"request_id":   reqID,
+				"request_id":   access.RequestID,
 				"provider":     providerFilter,
 				"tenant":       tenantFilter,
 				"count":        len(statuses),
@@ -268,10 +420,10 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 				"path", r.URL.Path,
 				"method", r.Method,
 				"endpoint", adminEndpointPollerStatus,
-				"request_id", reqID,
-				"token_slot", tokenSlot,
-				"requester_ip", requestIP,
-				"user_agent", userAgent,
+				"request_id", access.RequestID,
+				"token_slot", access.TokenSlot,
+				"requester_ip", access.RequestIP,
+				"user_agent", access.UserAgent,
 				"provider_filter", providerFilter,
 				"tenant_filter", tenantFilter,
 				"poller_count", len(statuses),
@@ -419,6 +571,372 @@ func writeAdminError(w http.ResponseWriter, status int, reqID, message string) {
 		"request_id": strings.TrimSpace(reqID),
 		"error":      strings.TrimSpace(message),
 	})
+}
+
+func parseOptionalBool(raw string, fallback bool) (bool, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("invalid boolean %q", raw)
+	}
+	return value, nil
+}
+
+func parseAdminAllowedCIDRs(raw []string) ([]*net.IPNet, error) {
+	out := make([]*net.IPNet, 0, len(raw))
+	for _, cidr := range raw {
+		cidr = strings.TrimSpace(cidr)
+		if cidr == "" {
+			continue
+		}
+		_, network, err := net.ParseCIDR(cidr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid CIDR %q", cidr)
+		}
+		out = append(out, network)
+	}
+	return out, nil
+}
+
+func adminRequesterAllowed(requestIP string, allow []*net.IPNet) bool {
+	if len(allow) == 0 {
+		return true
+	}
+	ip := net.ParseIP(strings.TrimSpace(requestIP))
+	if ip == nil {
+		return false
+	}
+	for _, cidr := range allow {
+		if cidr != nil && cidr.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func adminHasClientCert(r *http.Request, forwardedHeader string) bool {
+	if r == nil {
+		return false
+	}
+	if r.TLS != nil && len(r.TLS.VerifiedChains) > 0 {
+		return true
+	}
+	if strings.TrimSpace(forwardedHeader) == "" {
+		return false
+	}
+	return strings.TrimSpace(r.Header.Get(forwardedHeader)) != ""
+}
+
+type adminRateLimiterEntry struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
+type adminRateLimiterRegistry struct {
+	mu         sync.Mutex
+	entries    map[string]*adminRateLimiterEntry
+	limit      rate.Limit
+	burst      int
+	ttl        time.Duration
+	maxEntries int
+}
+
+func newAdminRateLimiterRegistry(limit rate.Limit, burst int) *adminRateLimiterRegistry {
+	if limit <= 0 {
+		limit = rate.Limit(1)
+	}
+	if burst <= 0 {
+		burst = 1
+	}
+	return &adminRateLimiterRegistry{
+		entries:    make(map[string]*adminRateLimiterEntry),
+		limit:      limit,
+		burst:      burst,
+		ttl:        15 * time.Minute,
+		maxEntries: 10000,
+	}
+}
+
+func (r *adminRateLimiterRegistry) Allow(endpoint, requestIP, token string) (bool, string) {
+	if r == nil {
+		return true, ""
+	}
+	ipKey := adminRateLimiterKey(endpoint, "ip", strings.TrimSpace(requestIP))
+	if !r.allowKey(ipKey) {
+		return false, "ip"
+	}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return true, ""
+	}
+	tokenKey := adminRateLimiterKey(endpoint, "token", adminTokenFingerprint(token))
+	if !r.allowKey(tokenKey) {
+		return false, "token"
+	}
+	return true, ""
+}
+
+func (r *adminRateLimiterRegistry) allowKey(key string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		key = "unknown"
+	}
+	now := time.Now().UTC()
+	r.mu.Lock()
+	r.cleanupLocked(now)
+	entry := r.entries[key]
+	if entry == nil {
+		entry = &adminRateLimiterEntry{
+			limiter: rate.NewLimiter(r.limit, r.burst),
+		}
+		r.entries[key] = entry
+	}
+	entry.lastSeen = now
+	limiter := entry.limiter
+	r.mu.Unlock()
+	return limiter.Allow()
+}
+
+func (r *adminRateLimiterRegistry) cleanupLocked(now time.Time) {
+	if r == nil {
+		return
+	}
+	cutoff := now.Add(-r.ttl)
+	for key, entry := range r.entries {
+		if entry == nil || entry.lastSeen.Before(cutoff) {
+			delete(r.entries, key)
+		}
+	}
+	for len(r.entries) > r.maxEntries {
+		var oldestKey string
+		var oldestTime time.Time
+		for key, entry := range r.entries {
+			if entry == nil {
+				oldestKey = key
+				break
+			}
+			if oldestKey == "" || entry.lastSeen.Before(oldestTime) {
+				oldestKey = key
+				oldestTime = entry.lastSeen
+			}
+		}
+		if oldestKey == "" {
+			break
+		}
+		delete(r.entries, oldestKey)
+	}
+}
+
+func adminRateLimiterKey(endpoint, scope, identity string) string {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		endpoint = "unknown"
+	}
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		scope = "unknown"
+	}
+	identity = strings.TrimSpace(identity)
+	if identity == "" {
+		identity = "unknown"
+	}
+	return endpoint + "|" + scope + "|" + identity
+}
+
+func adminTokenFingerprint(token string) string {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(token))
+	encoded := hex.EncodeToString(sum[:])
+	if len(encoded) > 16 {
+		return encoded[:16]
+	}
+	return encoded
+}
+
+type adminReplayJobSnapshot struct {
+	JobID          string    `json:"job_id"`
+	Status         string    `json:"status"`
+	RequestedLimit int       `json:"requested_limit,omitempty"`
+	EffectiveLimit int       `json:"effective_limit"`
+	MaxLimit       int       `json:"max_limit"`
+	Capped         bool      `json:"capped"`
+	DryRun         bool      `json:"dry_run"`
+	CreatedAt      time.Time `json:"created_at"`
+	StartedAt      time.Time `json:"started_at,omitempty"`
+	CompletedAt    time.Time `json:"completed_at,omitempty"`
+	Replayed       int       `json:"replayed"`
+	Error          string    `json:"error,omitempty"`
+}
+
+type adminReplayJob struct {
+	snapshot       adminReplayJobSnapshot
+	idempotencyKey string
+	updatedAt      time.Time
+}
+
+type adminReplayJobRegistry struct {
+	mu            sync.RWMutex
+	jobs          map[string]*adminReplayJob
+	byIdempotency map[string]string
+	ttl           time.Duration
+	maxJobs       int
+	sequence      uint64
+}
+
+func newAdminReplayJobRegistry(maxJobs int, ttl time.Duration) *adminReplayJobRegistry {
+	if maxJobs <= 0 {
+		maxJobs = 512
+	}
+	if ttl <= 0 {
+		ttl = 24 * time.Hour
+	}
+	return &adminReplayJobRegistry{
+		jobs:          make(map[string]*adminReplayJob),
+		byIdempotency: make(map[string]string),
+		ttl:           ttl,
+		maxJobs:       maxJobs,
+	}
+}
+
+func (r *adminReplayJobRegistry) Create(base adminReplayJobSnapshot, idempotencyKey string) adminReplayJobSnapshot {
+	now := time.Now().UTC()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cleanupLocked(now)
+	r.sequence++
+	jobID := fmt.Sprintf("replay_%d_%d", now.UnixNano(), r.sequence)
+	base.JobID = jobID
+	base.Status = adminReplayJobStatusQueued
+	base.CreatedAt = now
+	job := &adminReplayJob{
+		snapshot:       base,
+		idempotencyKey: strings.TrimSpace(idempotencyKey),
+		updatedAt:      now,
+	}
+	r.jobs[jobID] = job
+	if job.idempotencyKey != "" {
+		r.byIdempotency[job.idempotencyKey] = jobID
+	}
+	return base
+}
+
+func (r *adminReplayJobRegistry) Get(jobID string) (adminReplayJobSnapshot, bool) {
+	jobID = strings.TrimSpace(jobID)
+	if r == nil || jobID == "" {
+		return adminReplayJobSnapshot{}, false
+	}
+	r.mu.RLock()
+	job := r.jobs[jobID]
+	if job == nil {
+		r.mu.RUnlock()
+		return adminReplayJobSnapshot{}, false
+	}
+	snapshot := job.snapshot
+	r.mu.RUnlock()
+	return snapshot, true
+}
+
+func (r *adminReplayJobRegistry) GetByIdempotencyKey(key string) (adminReplayJobSnapshot, bool) {
+	key = strings.TrimSpace(key)
+	if r == nil || key == "" {
+		return adminReplayJobSnapshot{}, false
+	}
+	r.mu.RLock()
+	jobID := r.byIdempotency[key]
+	job := r.jobs[jobID]
+	if job == nil {
+		r.mu.RUnlock()
+		return adminReplayJobSnapshot{}, false
+	}
+	snapshot := job.snapshot
+	r.mu.RUnlock()
+	return snapshot, true
+}
+
+func (r *adminReplayJobRegistry) MarkRunning(jobID string) {
+	r.update(jobID, func(snapshot *adminReplayJobSnapshot) {
+		if snapshot.Status != adminReplayJobStatusQueued {
+			return
+		}
+		snapshot.Status = adminReplayJobStatusRunning
+		snapshot.StartedAt = time.Now().UTC()
+	})
+}
+
+func (r *adminReplayJobRegistry) MarkSucceeded(jobID string, replayed int) {
+	r.update(jobID, func(snapshot *adminReplayJobSnapshot) {
+		snapshot.Status = adminReplayJobStatusSucceeded
+		snapshot.Replayed = replayed
+		snapshot.CompletedAt = time.Now().UTC()
+		snapshot.Error = ""
+	})
+}
+
+func (r *adminReplayJobRegistry) MarkFailed(jobID, message string) {
+	r.update(jobID, func(snapshot *adminReplayJobSnapshot) {
+		snapshot.Status = adminReplayJobStatusFailed
+		snapshot.CompletedAt = time.Now().UTC()
+		snapshot.Error = strings.TrimSpace(message)
+	})
+}
+
+func (r *adminReplayJobRegistry) update(jobID string, mutate func(snapshot *adminReplayJobSnapshot)) {
+	jobID = strings.TrimSpace(jobID)
+	if r == nil || jobID == "" || mutate == nil {
+		return
+	}
+	now := time.Now().UTC()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cleanupLocked(now)
+	job := r.jobs[jobID]
+	if job == nil {
+		return
+	}
+	mutate(&job.snapshot)
+	job.updatedAt = time.Now().UTC()
+}
+
+func (r *adminReplayJobRegistry) cleanupLocked(now time.Time) {
+	if r == nil {
+		return
+	}
+	cutoff := now.Add(-r.ttl)
+	for jobID, job := range r.jobs {
+		if job == nil || job.updatedAt.Before(cutoff) {
+			delete(r.jobs, jobID)
+			if job != nil && job.idempotencyKey != "" {
+				delete(r.byIdempotency, job.idempotencyKey)
+			}
+		}
+	}
+	for len(r.jobs) > r.maxJobs {
+		var oldestID string
+		var oldestTime time.Time
+		for jobID, job := range r.jobs {
+			if job == nil {
+				oldestID = jobID
+				break
+			}
+			if oldestID == "" || job.updatedAt.Before(oldestTime) {
+				oldestID = jobID
+				oldestTime = job.updatedAt
+			}
+		}
+		if oldestID == "" {
+			break
+		}
+		if job := r.jobs[oldestID]; job != nil && job.idempotencyKey != "" {
+			delete(r.byIdempotency, job.idempotencyKey)
+		}
+		delete(r.jobs, oldestID)
+	}
 }
 
 func openPollStores(cfg config.StateConfig) (store.CheckpointStore, store.SnapshotStore, closer, error) {
@@ -598,6 +1116,63 @@ func (r *pollerStatusRegistry) SnapshotFiltered(provider, tenantID string) []pol
 		filtered = append(filtered, snapshot)
 	}
 	return filtered
+}
+
+func startPollerHealthMonitor(ctx context.Context, statuses *pollerStatusRegistry, metrics *health.Metrics) {
+	if statuses == nil || metrics == nil || metrics.PollerStuck == nil || metrics.PollerConsecutiveFailures == nil {
+		return
+	}
+	update := func() {
+		now := time.Now().UTC()
+		snapshots := statuses.Snapshot()
+		metrics.PollerStuck.Reset()
+		metrics.PollerConsecutiveFailures.Reset()
+		for _, snapshot := range snapshots {
+			provider := strings.TrimSpace(snapshot.Provider)
+			tenant := strings.TrimSpace(snapshot.TenantID)
+			metrics.PollerConsecutiveFailures.WithLabelValues(provider, tenant).Set(float64(snapshot.ConsecutiveFailures))
+			if pollerLooksStuck(snapshot, now) {
+				metrics.PollerStuck.WithLabelValues(provider, tenant).Set(1)
+				continue
+			}
+			metrics.PollerStuck.WithLabelValues(provider, tenant).Set(0)
+		}
+	}
+	update()
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				update()
+			}
+		}
+	}()
+}
+
+func pollerLooksStuck(snapshot pollerStatusSnapshot, now time.Time) bool {
+	if snapshot.FailureBudget > 0 && snapshot.ConsecutiveFailures >= snapshot.FailureBudget {
+		return true
+	}
+	if snapshot.LastRunAt.IsZero() {
+		return false
+	}
+	interval := time.Minute
+	if parsed, err := time.ParseDuration(strings.TrimSpace(snapshot.Interval)); err == nil && parsed > 0 {
+		interval = parsed
+	}
+	staleAfter := interval * 3
+	reference := snapshot.LastSuccessAt
+	if reference.IsZero() {
+		reference = snapshot.LastRunAt
+	}
+	if reference.IsZero() {
+		return false
+	}
+	return now.UTC().Sub(reference.UTC()) > staleAfter
 }
 
 type cloudEventPublisher interface {

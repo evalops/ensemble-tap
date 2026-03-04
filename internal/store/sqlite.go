@@ -30,7 +30,7 @@ func NewSQLiteStateStore(path string) (*SQLiteStateStore, error) {
 	}
 	dir := filepath.Dir(path)
 	if dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return nil, fmt.Errorf("create state directory: %w", err)
 		}
 	}

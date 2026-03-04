@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -141,6 +143,27 @@ func (p *Publisher) Replay(ctx context.Context, limit int, republish Republisher
 	return replayed, nil
 }
 
+func (p *Publisher) Pending() (int, error) {
+	if p == nil || p.js == nil {
+		return 0, fmt.Errorf("publisher is not initialized")
+	}
+	consumerInfo, err := p.js.ConsumerInfo(p.stream, p.consumer)
+	if err == nil && consumerInfo != nil {
+		return safeUint64ToInt(consumerInfo.NumPending)
+	}
+	if err != nil && !errors.Is(err, nats.ErrConsumerNotFound) {
+		return 0, err
+	}
+	streamInfo, err := p.js.StreamInfo(p.stream)
+	if err != nil {
+		return 0, err
+	}
+	if streamInfo == nil {
+		return 0, nil
+	}
+	return safeUint64ToInt(streamInfo.State.Msgs)
+}
+
 func buildID(rec Record) string {
 	raw := strings.Join([]string{rec.Stage, rec.Provider, rec.TenantID, rec.Reason, rec.OriginalSubject, rec.OriginalDedupID}, "|")
 	s := sha256.Sum256([]byte(raw))
@@ -155,4 +178,11 @@ func sanitize(v string) string {
 	v = strings.ReplaceAll(v, " ", "_")
 	v = strings.ReplaceAll(v, "/", "_")
 	return v
+}
+
+func safeUint64ToInt(value uint64) (int, error) {
+	if value > uint64(math.MaxInt) {
+		return math.MaxInt, fmt.Errorf("value %d exceeds max int", value)
+	}
+	return int(value), nil
 }

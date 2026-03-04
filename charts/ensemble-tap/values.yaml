@@ -59,6 +59,22 @@ autoscaling:
   minReplicas: 1
   maxReplicas: 5
   targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: null
+  customMetrics: []
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+  maxUnavailable: null
+
+networkPolicy:
+  enabled: true
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - {}
 
 nodeSelector: {}
 tolerations: []
@@ -70,6 +86,11 @@ env: []
 #     secretKeyRef:
 #       name: ensemble-tap-secrets
 #       key: adminToken
+
+envSecrets: []
+# - name: TAP_ADMIN_TOKEN
+#   secretName: ensemble-tap-secrets
+#   secretKey: adminToken
 
 envFromSecret: ""
 

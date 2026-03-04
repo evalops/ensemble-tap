@@ -49,6 +49,58 @@ func TestDLQRecordAndReplay(t *testing.T) {
 	}
 }
 
+func TestDLQPending(t *testing.T) {
+	s := runNATSServer(t)
+	nc, err := nats.Connect(s.ClientURL())
+	if err != nil {
+		t.Fatalf("connect nats: %v", err)
+	}
+	defer nc.Close()
+	js, err := nc.JetStream()
+	if err != nil {
+		t.Fatalf("jetstream: %v", err)
+	}
+
+	cfg := config.NATSConfig{Stream: "ENSEMBLE_TAP_PENDING", SubjectPrefix: "ensemble.tap"}
+	p, err := NewPublisher(context.Background(), cfg, js)
+	if err != nil {
+		t.Fatalf("new dlq publisher: %v", err)
+	}
+
+	rec := Record{
+		Stage:           "publish",
+		Provider:        "stripe",
+		Reason:          "forced test",
+		OriginalSubject: "ensemble.tap.stripe.invoice.updated",
+		OriginalPayload: []byte(`{"id":"evt_pending_1"}`),
+		OriginalDedupID: "evt_pending_1",
+	}
+	if err := p.Record(context.Background(), rec); err != nil {
+		t.Fatalf("record dlq: %v", err)
+	}
+	pending, err := p.Pending()
+	if err != nil {
+		t.Fatalf("read pending: %v", err)
+	}
+	if pending < 1 {
+		t.Fatalf("expected pending >= 1, got %d", pending)
+	}
+
+	if _, err := p.Replay(context.Background(), 10, func(ctx context.Context, subject string, payload []byte, dedupID string) error {
+		return nil
+	}); err != nil {
+		t.Fatalf("replay dlq: %v", err)
+	}
+
+	pendingAfter, err := p.Pending()
+	if err != nil {
+		t.Fatalf("read pending after replay: %v", err)
+	}
+	if pendingAfter != 0 {
+		t.Fatalf("expected no pending records after replay, got %d", pendingAfter)
+	}
+}
+
 func runNATSServer(t *testing.T) *natsserver.Server {
 	t.Helper()
 	opts := &natsserver.Options{Host: "127.0.0.1", Port: -1, JetStream: true, StoreDir: t.TempDir()}

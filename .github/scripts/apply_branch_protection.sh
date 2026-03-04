@@ -21,7 +21,18 @@ cat >"$payload_file" <<JSON
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": ["CI / test", "CI / docker-build", "CI / helm-lint", "CI / integration"]
+    "contexts": [
+      "CI / test",
+      "CI / openapi-contract",
+      "CI / docker-build",
+      "CI / helm-lint",
+      "CI / security-gosec",
+      "CI / security-govulncheck",
+      "CI / security-trivy",
+      "CI / security-sbom",
+      "CI / perf-smoke",
+      "CI / integration"
+    ]
   },
   "enforce_admins": true,
   "required_pull_request_reviews": {

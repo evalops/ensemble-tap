@@ -32,7 +32,7 @@ func TestNextWaitDurationFallsBackToBackoff(t *testing.T) {
 
 func TestApplyJitterBoundaries(t *testing.T) {
 	wait := 2 * time.Second
-	if got := applyJitter(wait, 0, nil); got != wait {
+	if got := applyJitter(wait, 0); got != wait {
 		t.Fatalf("expected unchanged wait without jitter, got %s", got)
 	}
 }

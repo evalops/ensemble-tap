@@ -19,19 +19,37 @@ paths:
             type: integer
             minimum: 1
           description: Optional replay count request; runtime enforces configured max cap.
+        - in: query
+          name: dry_run
+          required: false
+          schema:
+            type: boolean
+          description: When true, only computes replayable count without mutating DLQ.
         - in: header
           name: X-Request-ID
           required: false
           schema:
             type: string
           description: Optional correlation identifier echoed back in response.
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema:
+            type: string
+          description: Reuses an existing replay job when the same key is provided.
       responses:
         "200":
-          description: Replay completed.
+          description: Existing replay job returned due to idempotency-key reuse.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ReplayResponse"
+                $ref: "#/components/schemas/ReplayJobEnvelope"
+        "202":
+          description: Replay job accepted and queued/running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReplayJobEnvelope"
         "400":
           description: Invalid input (for example, bad limit value).
           content:
@@ -40,6 +58,12 @@ paths:
                 $ref: "#/components/schemas/AdminError"
         "401":
           description: Missing or invalid admin token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminError"
+        "403":
+          description: Rejected by CIDR allowlist or mTLS requirement.
           content:
             application/json:
               schema:
@@ -58,6 +82,58 @@ paths:
                 $ref: "#/components/schemas/AdminError"
         "500":
           description: Replay failure.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminError"
+  /admin/replay-dlq/{job_id}:
+    get:
+      summary: Fetch replay job status
+      security:
+        - AdminToken: []
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: X-Request-ID
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Replay job status payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReplayJobEnvelope"
+        "401":
+          description: Missing or invalid admin token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminError"
+        "403":
+          description: Rejected by CIDR allowlist or mTLS requirement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminError"
+        "404":
+          description: Replay job not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminError"
+        "429":
+          description: Rate-limited by admin token-bucket.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                minimum: 1
           content:
             application/json:
               schema:
@@ -99,6 +175,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AdminError"
+        "403":
+          description: Rejected by CIDR allowlist or mTLS requirement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminError"
         "429":
           description: Rate-limited by admin token-bucket.
           headers:
@@ -117,20 +199,35 @@ components:
       in: header
       name: X-Admin-Token
   schemas:
-    ReplayResponse:
+    ReplayJobEnvelope:
       type: object
       required:
         - request_id
-        - replayed
-        - effective_limit
-        - max_limit
-        - capped
+        - job
       properties:
         request_id:
           type: string
-        replayed:
-          type: integer
-          minimum: 0
+        idempotency_reused:
+          type: boolean
+        job:
+          $ref: "#/components/schemas/ReplayJob"
+    ReplayJob:
+      type: object
+      required:
+        - job_id
+        - status
+        - effective_limit
+        - max_limit
+        - capped
+        - dry_run
+        - created_at
+        - replayed
+      properties:
+        job_id:
+          type: string
+        status:
+          type: string
+          enum: [queued, running, succeeded, failed]
         requested_limit:
           type: integer
           minimum: 1
@@ -142,6 +239,22 @@ components:
           minimum: 1
         capped:
           type: boolean
+        dry_run:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        replayed:
+          type: integer
+          minimum: 0
+        error:
+          type: string
     PollerStatusResponse:
       type: object
       required:

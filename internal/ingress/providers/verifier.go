@@ -2,7 +2,7 @@ package providers
 
 import (
 	"crypto/hmac"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- compatibility for providers that still sign with SHA-1.
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"

@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -92,16 +93,19 @@ type ClickHouseConfig struct {
 }
 
 type ServerConfig struct {
-	Port                 int           `koanf:"port"`
-	BasePath             string        `koanf:"base_path"`
-	ReadTimeout          time.Duration `koanf:"read_timeout"`
-	WriteTimeout         time.Duration `koanf:"write_timeout"`
-	MaxBodySize          int64         `koanf:"max_body_size"`
-	AdminToken           string        `koanf:"admin_token"`
-	AdminTokenSecondary  string        `koanf:"admin_token_secondary"`
-	AdminReplayMaxLimit  int           `koanf:"admin_replay_max_limit"`
-	AdminRateLimitPerSec float64       `koanf:"admin_rate_limit_per_sec"`
-	AdminRateLimitBurst  int           `koanf:"admin_rate_limit_burst"`
+	Port                      int           `koanf:"port"`
+	BasePath                  string        `koanf:"base_path"`
+	ReadTimeout               time.Duration `koanf:"read_timeout"`
+	WriteTimeout              time.Duration `koanf:"write_timeout"`
+	MaxBodySize               int64         `koanf:"max_body_size"`
+	AdminToken                string        `koanf:"admin_token"`
+	AdminTokenSecondary       string        `koanf:"admin_token_secondary"`
+	AdminReplayMaxLimit       int           `koanf:"admin_replay_max_limit"`
+	AdminRateLimitPerSec      float64       `koanf:"admin_rate_limit_per_sec"`
+	AdminRateLimitBurst       int           `koanf:"admin_rate_limit_burst"`
+	AdminAllowedCIDRs         []string      `koanf:"admin_allowed_cidrs"`
+	AdminMTLSRequired         bool          `koanf:"admin_mtls_required"`
+	AdminMTLSClientCertHeader string        `koanf:"admin_mtls_client_cert_header"`
 }
 
 type StateConfig struct {
@@ -164,6 +168,9 @@ func (c *Config) ApplyDefaults() {
 	if c.Server.AdminRateLimitBurst == 0 {
 		c.Server.AdminRateLimitBurst = defaultAdminRateLimitBurst
 	}
+	if strings.TrimSpace(c.Server.AdminMTLSClientCertHeader) == "" {
+		c.Server.AdminMTLSClientCertHeader = "X-Forwarded-Client-Cert"
+	}
 	if c.State.Backend == "" {
 		c.State.Backend = "memory"
 	}
@@ -190,6 +197,18 @@ func (c Config) Validate() error {
 	if c.Server.AdminRateLimitBurst <= 0 {
 		return fmt.Errorf("server.admin_rate_limit_burst must be greater than 0")
 	}
+	for _, cidr := range c.Server.AdminAllowedCIDRs {
+		raw := strings.TrimSpace(cidr)
+		if raw == "" {
+			continue
+		}
+		if _, _, err := net.ParseCIDR(raw); err != nil {
+			return fmt.Errorf("server.admin_allowed_cidrs contains invalid CIDR %q", raw)
+		}
+	}
+	if strings.TrimSpace(c.Server.AdminMTLSClientCertHeader) == "" {
+		return fmt.Errorf("server.admin_mtls_client_cert_header must not be empty")
+	}
 	return nil
 }
 
@@ -201,6 +220,7 @@ func Load(path string) (Config, error) {
 	k := koanf.New(".")
 
 	if _, err := os.Stat(path); err == nil {
+		// #nosec G304 -- config path is an intentional operator-controlled CLI input.
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			return Config{}, fmt.Errorf("read config: %w", err)

@@ -41,6 +41,20 @@ jobs:
           name: coverage-profile
           path: coverage.out
 
+  openapi-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Verify admin OpenAPI contract
+        run: go test ./cmd/tap -run TestAdminOpenAPIContractMatchesRuntime -count=1
+
   docker-build:
     runs-on: ubuntu-latest
     steps:
@@ -67,6 +81,132 @@ jobs:
 
       - name: Render Chart
         run: helm template ensemble-tap charts/ensemble-tap >/dev/null
+
+  security-gosec:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.23.0
+
+      - name: Run gosec
+        run: $(go env GOPATH)/bin/gosec ./...
+
+  security-govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+
+      - name: Run govulncheck
+        run: $(go env GOPATH)/bin/govulncheck ./...
+
+  security-trivy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+  security-sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate source SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom-source.spdx.json
+
+      - name: Upload source SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-sbom
+          path: sbom-source.spdx.json
+
+  perf-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup k6
+        uses: grafana/setup-k6-action@v1
+
+      - name: Start NATS
+        run: docker run -d --name tap-nats -p 4222:4222 nats:2.11-alpine -js
+
+      - name: Build tap
+        run: go build -o ./bin/ensemble-tap ./cmd/tap
+
+      - name: Start tap
+        run: |
+          ./bin/ensemble-tap -config .github/perf/config.yaml > /tmp/tap.log 2>&1 &
+          echo $! > /tmp/tap.pid
+
+      - name: Wait for readiness
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18080/livez >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "tap failed to become ready" >&2
+          cat /tmp/tap.log >&2 || true
+          exit 1
+
+      - name: Run k6 smoke
+        env:
+          BASE_URL: http://127.0.0.1:18080
+          K6_VUS: "20"
+          K6_DURATION: 30s
+        run: k6 run .github/perf/smoke.js
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          cat /tmp/tap.log || true
+          docker logs tap-nats || true
+
+      - name: Stop tap + NATS
+        if: always()
+        run: |
+          if [ -f /tmp/tap.pid ]; then
+            kill "$(cat /tmp/tap.pid)" || true
+          fi
+          docker rm -f tap-nats || true
 
   integration:
     runs-on: ubuntu-latest

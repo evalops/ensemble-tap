@@ -74,6 +74,9 @@ func TestLoadConfigMissingFileAppliesDefaults(t *testing.T) {
 	if cfg.Server.AdminRateLimitBurst != 20 {
 		t.Fatalf("expected default admin rate limit burst 20, got %d", cfg.Server.AdminRateLimitBurst)
 	}
+	if cfg.Server.AdminMTLSClientCertHeader != "X-Forwarded-Client-Cert" {
+		t.Fatalf("expected default mTLS client cert header, got %q", cfg.Server.AdminMTLSClientCertHeader)
+	}
 }
 
 func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
@@ -189,6 +192,15 @@ func TestConfigValidateAdminTokenAndReplayRules(t *testing.T) {
 			wantErrSub: "admin_rate_limit_burst",
 		},
 		{
+			name: "admin allowlist CIDR must be valid",
+			cfg: Config{
+				Server: ServerConfig{
+					AdminAllowedCIDRs: []string{"not-a-cidr"},
+				},
+			},
+			wantErrSub: "admin_allowed_cidrs",
+		},
+		{
 			name: "valid token rotation and replay max",
 			cfg: Config{
 				Server: ServerConfig{
@@ -197,6 +209,7 @@ func TestConfigValidateAdminTokenAndReplayRules(t *testing.T) {
 					AdminReplayMaxLimit:  5000,
 					AdminRateLimitPerSec: 3.5,
 					AdminRateLimitBurst:  11,
+					AdminAllowedCIDRs:    []string{"203.0.113.0/24"},
 				},
 			},
 		},

@@ -31,6 +31,22 @@
               "type": "integer",
               "minimum": 1,
               "description": "Admin endpoint token-bucket burst size."
+            },
+            "admin_allowed_cidrs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Optional CIDR allowlist enforced on /admin endpoints."
+            },
+            "admin_mtls_required": {
+              "type": "boolean",
+              "description": "Require mTLS client certificate (or trusted forwarded cert header) on /admin endpoints."
+            },
+            "admin_mtls_client_cert_header": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Header used for forwarded client certificate identity when behind trusted TLS termination."
             }
           },
           "allOf": [
@@ -53,6 +69,59 @@
               }
             }
           ]
+        }
+      }
+    },
+    "autoscaling": {
+      "type": "object",
+      "properties": {
+        "targetCPUUtilizationPercentage": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "targetMemoryUtilizationPercentage": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "customMetrics": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "envSecrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "secretName", "secretKey"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "secretName": { "type": "string", "minLength": 1 },
+          "secretKey": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "podDisruptionBudget": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "minAvailable": { "type": ["integer", "string", "null"] },
+        "maxUnavailable": { "type": ["integer", "string", "null"] }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "ingress": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "egress": {
+          "type": "array",
+          "items": { "type": "object" }
         }
       }
     }

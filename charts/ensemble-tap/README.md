@@ -33,13 +33,24 @@ helm upgrade --install ensemble-tap ./charts/ensemble-tap \
   --set config.server.admin_token_secondary='${TAP_ADMIN_TOKEN_SECONDARY}' \
   --set config.server.admin_replay_max_limit=2000 \
   --set config.server.admin_rate_limit_per_sec=5 \
-  --set config.server.admin_rate_limit_burst=20
+  --set config.server.admin_rate_limit_burst=20 \
+  --set config.server.admin_allowed_cidrs[0]=203.0.113.0/24 \
+  --set config.server.admin_mtls_required=true \
+  --set config.server.admin_mtls_client_cert_header=X-Forwarded-Client-Cert
 ```
 
 Notes:
 - `config.server.admin_replay_max_limit` is validated in chart schema and runtime (`1..100000`).
 - `config.server.admin_token_secondary` should only be used with `config.server.admin_token`.
 - `config.server.admin_rate_limit_per_sec` and `config.server.admin_rate_limit_burst` must both be greater than `0`.
+- `config.server.admin_allowed_cidrs` and `config.server.admin_mtls_required` provide network and client-cert guardrails for admin routes.
+
+## Ops hardening defaults
+
+- `podDisruptionBudget.enabled=true` with `minAvailable=1`.
+- `networkPolicy.enabled=true` with explicit ingress/egress policy stanzas.
+- `envSecrets` supports direct `env` values from secret key references.
+- `autoscaling.customMetrics` enables HPA custom metrics in addition to CPU/memory targets.
 
 ## Enable sqlite state persistence
 

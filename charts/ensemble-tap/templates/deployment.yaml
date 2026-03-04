@@ -61,9 +61,18 @@ spec:
             - secretRef:
                 name: {{ .Values.envFromSecret }}
           {{- end }}
-          {{- with .Values.env }}
+          {{- if or .Values.env .Values.envSecrets }}
           env:
+            {{- range .Values.envSecrets }}
+            - name: {{ .name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretName }}
+                  key: {{ .secretKey }}
+            {{- end }}
+            {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
           volumeMounts:
             - name: config
