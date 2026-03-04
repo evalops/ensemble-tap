@@ -1,6 +1,7 @@
 package ingress
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -116,6 +117,9 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
+	// Some providers (for example GitHub helpers) read from r.Body during verification.
+	// Rewind body after initial size-bounded read.
+	r.Body = io.NopCloser(bytes.NewReader(body))
 
 	hooked, err := handler.Handle(r, body, cfg)
 	if err != nil {

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/knadh/koanf/parsers/yaml"
-	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
 )
@@ -140,13 +139,7 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("stat config: %w", err)
 	}
 
-	if err := k.Load(env.Provider(envPrefix, ".", func(s string) string {
-		n := strings.TrimPrefix(strings.ToLower(s), strings.ToLower(envPrefix))
-		n = strings.ReplaceAll(n, "__", "-")
-		n = strings.ReplaceAll(n, "_", ".")
-		n = strings.ReplaceAll(n, "-", "_")
-		return n
-	}), nil); err != nil {
+	if err := applyEnvOverrides(k); err != nil {
 		return Config{}, fmt.Errorf("load env config: %w", err)
 	}
 
@@ -156,4 +149,52 @@ func Load(path string) (Config, error) {
 	}
 	cfg.ApplyDefaults()
 	return cfg, nil
+}
+
+func applyEnvOverrides(k *koanf.Koanf) error {
+	for _, kv := range os.Environ() {
+		key, value, found := strings.Cut(kv, "=")
+		if !found {
+			continue
+		}
+		path, ok := envKeyToPath(key)
+		if !ok {
+			continue
+		}
+		if err := k.Set(path, value); err != nil {
+			return fmt.Errorf("set %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
+func envKeyToPath(key string) (string, bool) {
+	if !strings.HasPrefix(key, envPrefix) {
+		return "", false
+	}
+	raw := strings.ToLower(strings.TrimPrefix(key, envPrefix))
+	if raw == "" {
+		return "", false
+	}
+
+	// Allow escaped underscores from old style (e.g. SUBJECT__PREFIX).
+	raw = strings.ReplaceAll(raw, "__", "_")
+	parts := strings.Split(raw, "_")
+	if len(parts) < 2 {
+		return "", false
+	}
+
+	switch parts[0] {
+	case "providers":
+		if len(parts) < 3 {
+			return "", false
+		}
+		provider := parts[1]
+		field := strings.Join(parts[2:], "_")
+		return "providers." + provider + "." + field, true
+	default:
+		section := parts[0]
+		field := strings.Join(parts[1:], "_")
+		return section + "." + field, true
+	}
 }

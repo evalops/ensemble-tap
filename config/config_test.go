@@ -65,3 +65,34 @@ func TestLoadConfigMissingFileAppliesDefaults(t *testing.T) {
 		t.Fatalf("expected default base path, got %q", cfg.Server.BasePath)
 	}
 }
+
+func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.yaml")
+
+	t.Setenv("TAP_NATS_SUBJECT_PREFIX", "ensemble.tap.custom")
+	t.Setenv("TAP_SERVER_MAX_BODY_SIZE", "2097152")
+	t.Setenv("TAP_CLICKHOUSE_FLUSH_INTERVAL", "3s")
+	t.Setenv("TAP_PROVIDERS_STRIPE_SECRET", "whsec_env")
+	t.Setenv("TAP_PROVIDERS_HUBSPOT_CLIENT_SECRET", "hs_client_secret")
+
+	cfg, err := Load(missing)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	if cfg.NATS.SubjectPrefix != "ensemble.tap.custom" {
+		t.Fatalf("expected nats.subject_prefix override, got %q", cfg.NATS.SubjectPrefix)
+	}
+	if cfg.Server.MaxBodySize != 2097152 {
+		t.Fatalf("expected server.max_body_size override, got %d", cfg.Server.MaxBodySize)
+	}
+	if cfg.ClickHouse.FlushInterval != 3*time.Second {
+		t.Fatalf("expected clickhouse.flush_interval override, got %s", cfg.ClickHouse.FlushInterval)
+	}
+	if cfg.Providers["stripe"].Secret != "whsec_env" {
+		t.Fatalf("expected providers.stripe.secret override")
+	}
+	if cfg.Providers["hubspot"].ClientSecret != "hs_client_secret" {
+		t.Fatalf("expected providers.hubspot.client_secret override")
+	}
+}

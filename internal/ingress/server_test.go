@@ -16,6 +16,7 @@ import (
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/evalops/ensemble-tap/config"
+	"github.com/evalops/ensemble-tap/internal/normalize"
 	normproviders "github.com/evalops/ensemble-tap/internal/normalize/providers"
 )
 
@@ -169,6 +170,43 @@ func TestServerReturns404WhenProviderNotConfigured(t *testing.T) {
 	}
 	if pub.called != 0 {
 		t.Fatalf("publisher should not be called")
+	}
+}
+
+func TestServerAcceptsGitHubWebhookAfterBodyRead(t *testing.T) {
+	secret := "github-secret"
+	body := []byte(`{"action":"opened","issue":{"id":7}}`)
+
+	pub := &fakePublisher{}
+	srv := newTestServer(map[string]config.ProviderConfig{
+		"github": {Secret: secret, TenantID: "tenant-gh"},
+	}, pub)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(body))
+	req.Header.Set("X-Hub-Signature-256", signSHA256Hex(secret, body))
+	req.Header.Set("X-GitHub-Event", "issues")
+	req.Header.Set("X-GitHub-Delivery", "delivery-1")
+	req.Header.Set("Content-Type", "application/json")
+
+	rr := httptest.NewRecorder()
+	srv.Routes().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d (%s)", rr.Code, rr.Body.String())
+	}
+	if pub.called != 1 {
+		t.Fatalf("expected publisher called once, got %d", pub.called)
+	}
+	if pub.lastDedup != "delivery-1" {
+		t.Fatalf("expected github delivery id as dedup id, got %q", pub.lastDedup)
+	}
+
+	var data normalize.TapEventData
+	if err := pub.lastEvent.DataAs(&data); err != nil {
+		t.Fatalf("decode cloud event data: %v", err)
+	}
+	if data.Provider != "github" || data.EntityType != "issues" || data.Action != "opened" {
+		t.Fatalf("unexpected github event data: %+v", data)
 	}
 }
 
