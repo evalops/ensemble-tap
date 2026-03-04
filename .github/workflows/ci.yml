@@ -5,6 +5,10 @@ on:
     branches: ["main"]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -48,3 +52,77 @@ jobs:
 
       - name: Build image
         run: docker build .
+
+  helm-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Lint Chart
+        run: helm lint charts/ensemble-tap
+
+      - name: Render Chart
+        run: helm template ensemble-tap charts/ensemble-tap >/dev/null
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Start NATS + ClickHouse
+        run: |
+          docker run -d --name tap-nats -p 4222:4222 -p 8222:8222 nats:2.11-alpine -js
+          docker run -d --name tap-clickhouse -p 8123:8123 -p 9000:9000 clickhouse/clickhouse-server:24
+
+      - name: Wait for services
+        run: |
+          wait_for_port() {
+            local host="$1"
+            local port="$2"
+            local timeout="$3"
+            for i in $(seq 1 "$timeout"); do
+              (echo >"/dev/tcp/$host/$port") >/dev/null 2>&1 && return 0
+              sleep 1
+            done
+            return 1
+          }
+
+          wait_for_http() {
+            local url="$1"
+            local timeout="$2"
+            for i in $(seq 1 "$timeout"); do
+              curl -fsS "$url" >/dev/null && return 0
+              sleep 1
+            done
+            return 1
+          }
+
+          wait_for_port 127.0.0.1 4222 60
+          wait_for_http http://127.0.0.1:8123/ping 60
+
+      - name: Run Real Integration Test
+        env:
+          NATS_URL: nats://127.0.0.1:4222
+          CLICKHOUSE_ADDR: 127.0.0.1:9000
+        run: go test -tags=integration ./internal/publish -run TestRealNATSClickHousePipeline -count=1
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: |
+          docker logs tap-nats || true
+          docker logs tap-clickhouse || true
+
+      - name: Stop containers
+        if: always()
+        run: |
+          docker rm -f tap-nats tap-clickhouse || true

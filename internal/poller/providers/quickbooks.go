@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -18,6 +17,11 @@ type QuickBooksFetcher struct {
 	HTTPClient   *http.Client
 	BaseURL      string
 	AccessToken  string
+	TokenURL     string
+	ClientID     string
+	ClientSecret string
+	RefreshToken string
+	Scope        string
 	RealmID      string
 	Entities     []string
 	QueryPerPage int
@@ -50,6 +54,14 @@ func (q *QuickBooksFetcher) Fetch(ctx context.Context, checkpoint string) (polle
 	entities := make([]poller.Entity, 0)
 	client := clientOrDefault(q.HTTPClient)
 	base := trimTrailingSlash(q.BaseURL)
+	token := strings.TrimSpace(q.AccessToken)
+	oauth := OAuthRefreshConfig{
+		TokenURL:     q.TokenURL,
+		ClientID:     q.ClientID,
+		ClientSecret: q.ClientSecret,
+		RefreshToken: q.RefreshToken,
+		Scope:        q.Scope,
+	}
 
 	for _, entityName := range entitiesList {
 		query := fmt.Sprintf("SELECT * FROM %s", entityName)
@@ -59,21 +71,17 @@ func (q *QuickBooksFetcher) Fetch(ctx context.Context, checkpoint string) (polle
 		query += " ORDERBY MetaData.LastUpdatedTime STARTPOSITION 1 MAXRESULTS " + strconv.Itoa(limit)
 
 		endpoint := fmt.Sprintf("%s/v3/company/%s/query?query=%s", base, q.RealmID, url.QueryEscape(query))
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-		if err != nil {
-			return poller.FetchResult{}, fmt.Errorf("build quickbooks request: %w", err)
-		}
-		req.Header.Set("Authorization", "Bearer "+q.AccessToken)
-		req.Header.Set("Accept", "application/json")
-
-		resp, err := client.Do(req)
+		body, err := doAuthenticatedRequest(ctx, client, &token, oauth, func(accessToken string) (*http.Request, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+			if err != nil {
+				return nil, fmt.Errorf("build quickbooks request: %w", err)
+			}
+			req.Header.Set("Authorization", "Bearer "+accessToken)
+			req.Header.Set("Accept", "application/json")
+			return req, nil
+		})
 		if err != nil {
 			return poller.FetchResult{}, fmt.Errorf("quickbooks request failed: %w", err)
-		}
-		body, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if resp.StatusCode >= 300 {
-			return poller.FetchResult{}, fmt.Errorf("quickbooks request failed: status %d", resp.StatusCode)
 		}
 
 		var out map[string]any
@@ -117,6 +125,7 @@ func (q *QuickBooksFetcher) Fetch(ctx context.Context, checkpoint string) (polle
 			}
 		}
 	}
+	q.AccessToken = token
 
 	return poller.FetchResult{Entities: entities, NextCheckpoint: formatCheckpoint(next, checkpoint)}, nil
 }

@@ -98,12 +98,15 @@ func (p *NATSPublisher) Publish(ctx context.Context, event cloudevents.Event, de
 	if !p.ready.Load() {
 		return "", fmt.Errorf("nats not ready")
 	}
+	if err := normalize.ValidateCloudEvent(event); err != nil {
+		return "", err
+	}
 
 	var data normalize.TapEventData
 	if err := event.DataAs(&data); err != nil {
 		return "", fmt.Errorf("decode cloudevent data: %w", err)
 	}
-	subject := normalize.BuildSubject(p.cfg.SubjectPrefix, data.Provider, data.EntityType, data.Action)
+	subject := normalize.BuildSubjectWithTenant(p.cfg.SubjectPrefix, data.TenantID, data.Provider, data.EntityType, data.Action, p.cfg.TenantScopedSubjects)
 
 	payload, err := json.Marshal(event)
 	if err != nil {
@@ -131,6 +134,18 @@ func (p *NATSPublisher) Publish(ctx context.Context, event cloudevents.Event, de
 		}
 	}
 	return subject, nil
+}
+
+func (p *NATSPublisher) PublishRaw(ctx context.Context, subject string, payload []byte, dedupID string) error {
+	if !p.ready.Load() {
+		return fmt.Errorf("nats not ready")
+	}
+	msg := &nats.Msg{Subject: subject, Data: payload, Header: nats.Header{}}
+	if strings.TrimSpace(dedupID) != "" {
+		msg.Header.Set(nats.MsgIdHdr, dedupID)
+	}
+	_, err := p.js.PublishMsg(msg, nats.Context(ctx))
+	return err
 }
 
 func (p *NATSPublisher) JetStream() nats.JetStreamContext {

@@ -1,11 +1,18 @@
 package providers
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/evalops/ensemble-tap/internal/poller"
 )
 
 func clientOrDefault(c *http.Client) *http.Client {
@@ -97,4 +104,135 @@ func require(value, name string) error {
 		return fmt.Errorf("%s is required", name)
 	}
 	return nil
+}
+
+type OAuthRefreshConfig struct {
+	TokenURL     string
+	ClientID     string
+	ClientSecret string
+	RefreshToken string
+	Scope        string
+}
+
+func (c OAuthRefreshConfig) enabled() bool {
+	return strings.TrimSpace(c.TokenURL) != "" && strings.TrimSpace(c.ClientID) != "" && strings.TrimSpace(c.ClientSecret) != ""
+}
+
+func doAuthenticatedRequest(
+	ctx context.Context,
+	client *http.Client,
+	token *string,
+	oauth OAuthRefreshConfig,
+	buildReq func(accessToken string) (*http.Request, error),
+) ([]byte, error) {
+	perform := func(accessToken string) (*http.Response, []byte, error) {
+		req, err := buildReq(accessToken)
+		if err != nil {
+			return nil, nil, err
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, nil, err
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return resp, body, nil
+	}
+
+	accessToken := strings.TrimSpace(*token)
+	resp, body, err := perform(accessToken)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		if oauth.enabled() {
+			refreshed, refreshErr := refreshAccessToken(ctx, client, oauth)
+			if refreshErr != nil {
+				return nil, fmt.Errorf("token refresh failed: %w", refreshErr)
+			}
+			*token = refreshed
+			resp, body, err = perform(refreshed)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, poller.RateLimitedError{
+			Provider:   "poller",
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), 2*time.Second),
+		}
+	}
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("request failed with status %d: %s", resp.StatusCode, truncate(string(body), 256))
+	}
+	return body, nil
+}
+
+func refreshAccessToken(ctx context.Context, client *http.Client, cfg OAuthRefreshConfig) (string, error) {
+	values := url.Values{}
+	values.Set("client_id", cfg.ClientID)
+	values.Set("client_secret", cfg.ClientSecret)
+	if strings.TrimSpace(cfg.RefreshToken) != "" {
+		values.Set("grant_type", "refresh_token")
+		values.Set("refresh_token", cfg.RefreshToken)
+	} else {
+		values.Set("grant_type", "client_credentials")
+	}
+	if strings.TrimSpace(cfg.Scope) != "" {
+		values.Set("scope", cfg.Scope)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.TokenURL, bytes.NewBufferString(values.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return "", fmt.Errorf("token endpoint status %d: %s", resp.StatusCode, truncate(string(body), 256))
+	}
+
+	var out struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(out.AccessToken) == "" {
+		return "", fmt.Errorf("token endpoint did not return access_token")
+	}
+	return out.AccessToken, nil
+}
+
+func parseRetryAfter(raw string, fallback time.Duration) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fallback
+	}
+	if secs, err := strconv.Atoi(raw); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	if when, err := time.Parse(time.RFC1123, raw); err == nil {
+		d := time.Until(when)
+		if d > 0 {
+			return d
+		}
+	}
+	return fallback
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max]
 }

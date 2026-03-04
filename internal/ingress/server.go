@@ -15,6 +15,7 @@ import (
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/evalops/ensemble-tap/config"
+	"github.com/evalops/ensemble-tap/internal/dlq"
 	"github.com/evalops/ensemble-tap/internal/health"
 	"github.com/evalops/ensemble-tap/internal/ingress/providers"
 	"github.com/evalops/ensemble-tap/internal/normalize"
@@ -27,11 +28,16 @@ type Publisher interface {
 type Server struct {
 	cfg        config.Config
 	publisher  Publisher
+	dlq        DLQRecorder
 	metrics    *health.Metrics
 	logger     *slog.Logger
 	handlers   map[string]providers.Handler
 	generic    providers.GenericHandler
 	httpServer *http.Server
+}
+
+type DLQRecorder interface {
+	Record(ctx context.Context, rec dlq.Record) error
 }
 
 func NewServer(cfg config.Config, publisher Publisher, metrics *health.Metrics, logger *slog.Logger) *Server {
@@ -55,6 +61,10 @@ func NewServer(cfg config.Config, publisher Publisher, metrics *health.Metrics, 
 	}
 }
 
+func (s *Server) SetDLQRecorder(recorder DLQRecorder) {
+	s.dlq = recorder
+}
+
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	base := strings.TrimSpace(s.cfg.Server.BasePath)
@@ -67,6 +77,8 @@ func (s *Server) Routes() http.Handler {
 	}
 	pattern := "POST " + base + "/{provider}"
 	mux.HandleFunc(pattern, s.handleWebhook)
+	patternTenant := "POST " + base + "/{provider}/{tenant}"
+	mux.HandleFunc(patternTenant, s.handleWebhook)
 	return mux
 }
 
@@ -100,7 +112,13 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg, ok := s.cfg.Providers[provider]
+	tenantFromPath := strings.TrimSpace(r.PathValue("tenant"))
+	tenantFromHeader := strings.TrimSpace(r.Header.Get("X-Tap-Tenant"))
+	tenantID := tenantFromPath
+	if tenantID == "" {
+		tenantID = tenantFromHeader
+	}
+	cfg, ok := s.resolveProviderConfig(provider, tenantID)
 	if !ok {
 		http.Error(w, "provider not configured", http.StatusNotFound)
 		return
@@ -126,6 +144,14 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		if s.metrics != nil {
 			s.metrics.WebhookVerificationFailuresTotal.WithLabelValues(provider).Inc()
 		}
+		s.recordDLQ(r.Context(), dlq.Record{
+			Stage:           "verify",
+			Provider:        provider,
+			TenantID:        cfg.TenantID,
+			Reason:          err.Error(),
+			OriginalSubject: r.URL.Path,
+			OriginalPayload: body,
+		})
 		s.observe(provider, "rejected", start)
 		s.logger.Warn("webhook rejected", "provider", provider, "error", err)
 		http.Error(w, "signature verification failed", http.StatusUnauthorized)
@@ -134,6 +160,15 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	ce, err := normalize.ToCloudEvent(hooked.Normalized)
 	if err != nil {
+		s.recordDLQ(r.Context(), dlq.Record{
+			Stage:           "normalize",
+			Provider:        provider,
+			TenantID:        cfg.TenantID,
+			Reason:          err.Error(),
+			OriginalSubject: r.URL.Path,
+			OriginalDedupID: hooked.DedupID,
+			OriginalPayload: body,
+		})
 		s.observe(provider, "error", start)
 		s.logger.Error("normalize webhook", "provider", provider, "error", err)
 		http.Error(w, "normalization failed", http.StatusInternalServerError)
@@ -144,8 +179,28 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if dedupID == "" {
 		dedupID = hashDedupID(hooked.Normalized)
 	}
+	if strings.TrimSpace(cfg.TenantID) != "" {
+		dedupID = cfg.TenantID + ":" + dedupID
+	}
 	subject, err := s.publisher.Publish(r.Context(), ce, dedupID)
 	if err != nil {
+		payload, _ := json.Marshal(ce)
+		s.recordDLQ(r.Context(), dlq.Record{
+			Stage:    "publish",
+			Provider: provider,
+			TenantID: cfg.TenantID,
+			Reason:   err.Error(),
+			OriginalSubject: normalize.BuildSubjectWithTenant(
+				s.cfg.NATS.SubjectPrefix,
+				hooked.Normalized.TenantID,
+				hooked.Normalized.Provider,
+				hooked.Normalized.EntityType,
+				hooked.Normalized.Action,
+				s.cfg.NATS.TenantScopedSubjects,
+			),
+			OriginalDedupID: dedupID,
+			OriginalPayload: payload,
+		})
 		s.observe(provider, "error", start)
 		s.logger.Error("publish webhook", "provider", provider, "error", err)
 		http.Error(w, "publish failed", http.StatusInternalServerError)
@@ -174,6 +229,7 @@ func (s *Server) observe(provider, status string, started time.Time) {
 func hashDedupID(evt normalize.NormalizedEvent) string {
 	raw := strings.Join([]string{
 		evt.Provider,
+		evt.TenantID,
 		evt.EntityType,
 		evt.EntityID,
 		evt.Action,
@@ -181,4 +237,57 @@ func hashDedupID(evt normalize.NormalizedEvent) string {
 	}, "|")
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
+}
+
+func (s *Server) recordDLQ(ctx context.Context, rec dlq.Record) {
+	if s.dlq == nil {
+		return
+	}
+	_ = s.dlq.Record(ctx, rec)
+}
+
+func (s *Server) resolveProviderConfig(provider, tenantID string) (config.ProviderConfig, bool) {
+	base, ok := s.cfg.Providers[provider]
+	if !ok {
+		return config.ProviderConfig{}, false
+	}
+	if strings.TrimSpace(tenantID) == "" {
+		return base, true
+	}
+	if base.Tenants == nil {
+		base.TenantID = tenantID
+		return base, true
+	}
+	tenantCfg, ok := base.Tenants[tenantID]
+	if !ok {
+		base.TenantID = tenantID
+		return base, true
+	}
+	if strings.TrimSpace(tenantCfg.TenantID) != "" {
+		base.TenantID = tenantCfg.TenantID
+	} else {
+		base.TenantID = tenantID
+	}
+	if strings.TrimSpace(tenantCfg.Secret) != "" {
+		base.Secret = tenantCfg.Secret
+	}
+	if strings.TrimSpace(tenantCfg.ClientSecret) != "" {
+		base.ClientSecret = tenantCfg.ClientSecret
+	}
+	if strings.TrimSpace(tenantCfg.AccessToken) != "" {
+		base.AccessToken = tenantCfg.AccessToken
+	}
+	if strings.TrimSpace(tenantCfg.APIKey) != "" {
+		base.APIKey = tenantCfg.APIKey
+	}
+	if strings.TrimSpace(tenantCfg.BaseURL) != "" {
+		base.BaseURL = tenantCfg.BaseURL
+	}
+	if strings.TrimSpace(tenantCfg.RealmID) != "" {
+		base.RealmID = tenantCfg.RealmID
+	}
+	if strings.TrimSpace(tenantCfg.RefreshToken) != "" {
+		base.RefreshToken = tenantCfg.RefreshToken
+	}
+	return base, true
 }

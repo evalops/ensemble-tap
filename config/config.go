@@ -22,32 +22,50 @@ type Config struct {
 	NATS       NATSConfig                `koanf:"nats"`
 	ClickHouse ClickHouseConfig          `koanf:"clickhouse"`
 	Server     ServerConfig              `koanf:"server"`
+	State      StateConfig               `koanf:"state"`
 }
 
 type ProviderConfig struct {
-	Mode                 string        `koanf:"mode"`
-	Secret               string        `koanf:"secret"`
-	Events               []string      `koanf:"events"`
-	PollInterval         time.Duration `koanf:"poll_interval"`
-	BaseURL              string        `koanf:"base_url"`
-	AccessToken          string        `koanf:"access_token"`
-	Objects              []string      `koanf:"objects"`
-	RealmID              string        `koanf:"realm_id"`
-	APIVersion           string        `koanf:"api_version"`
-	QueryPerPage         int           `koanf:"query_per_page"`
-	TenantID             string        `koanf:"tenant_id"`
-	AppID                string        `koanf:"app_id"`
-	ClientSecret         string        `koanf:"client_secret"`
-	APIKey               string        `koanf:"api_key"`
-	WebhookVerifierToken string        `koanf:"webhook_verifier_token"`
+	Mode                 string                          `koanf:"mode"`
+	Secret               string                          `koanf:"secret"`
+	Events               []string                        `koanf:"events"`
+	PollInterval         time.Duration                   `koanf:"poll_interval"`
+	BaseURL              string                          `koanf:"base_url"`
+	AccessToken          string                          `koanf:"access_token"`
+	Objects              []string                        `koanf:"objects"`
+	RealmID              string                          `koanf:"realm_id"`
+	APIVersion           string                          `koanf:"api_version"`
+	QueryPerPage         int                             `koanf:"query_per_page"`
+	TokenURL             string                          `koanf:"token_url"`
+	ClientID             string                          `koanf:"client_id"`
+	Scope                string                          `koanf:"scope"`
+	RefreshToken         string                          `koanf:"refresh_token"`
+	TenantID             string                          `koanf:"tenant_id"`
+	AppID                string                          `koanf:"app_id"`
+	ClientSecret         string                          `koanf:"client_secret"`
+	APIKey               string                          `koanf:"api_key"`
+	WebhookVerifierToken string                          `koanf:"webhook_verifier_token"`
+	Tenants              map[string]ProviderTenantConfig `koanf:"tenants"`
+}
+
+type ProviderTenantConfig struct {
+	TenantID     string `koanf:"tenant_id"`
+	Secret       string `koanf:"secret"`
+	ClientSecret string `koanf:"client_secret"`
+	AccessToken  string `koanf:"access_token"`
+	APIKey       string `koanf:"api_key"`
+	BaseURL      string `koanf:"base_url"`
+	RealmID      string `koanf:"realm_id"`
+	RefreshToken string `koanf:"refresh_token"`
 }
 
 type NATSConfig struct {
-	URL           string        `koanf:"url"`
-	Stream        string        `koanf:"stream"`
-	SubjectPrefix string        `koanf:"subject_prefix"`
-	MaxAge        time.Duration `koanf:"max_age"`
-	DedupWindow   time.Duration `koanf:"dedup_window"`
+	URL                  string        `koanf:"url"`
+	Stream               string        `koanf:"stream"`
+	SubjectPrefix        string        `koanf:"subject_prefix"`
+	TenantScopedSubjects bool          `koanf:"tenant_scoped_subjects"`
+	MaxAge               time.Duration `koanf:"max_age"`
+	DedupWindow          time.Duration `koanf:"dedup_window"`
 }
 
 type ClickHouseConfig struct {
@@ -64,6 +82,12 @@ type ServerConfig struct {
 	ReadTimeout  time.Duration `koanf:"read_timeout"`
 	WriteTimeout time.Duration `koanf:"write_timeout"`
 	MaxBodySize  int64         `koanf:"max_body_size"`
+	AdminToken   string        `koanf:"admin_token"`
+}
+
+type StateConfig struct {
+	Backend    string `koanf:"backend"`
+	SQLitePath string `koanf:"sqlite_path"`
 }
 
 func (c *Config) ApplyDefaults() {
@@ -111,6 +135,12 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Server.MaxBodySize == 0 {
 		c.Server.MaxBodySize = 1 << 20
+	}
+	if c.State.Backend == "" {
+		c.State.Backend = "memory"
+	}
+	if c.State.SQLitePath == "" {
+		c.State.SQLitePath = "tap-state.db"
 	}
 }
 

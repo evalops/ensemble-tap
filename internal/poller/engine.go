@@ -93,7 +93,7 @@ func RunCycle(ctx context.Context, fetcher Fetcher, checkpoints CheckpointStore,
 			Changes:      changes,
 			Snapshot:     entity.Snapshot,
 		}
-		dedup := dedupID(entity, action)
+		dedup := dedupID(entity, action, tenantID)
 		if err := sink.Publish(ctx, evt, dedup); err != nil {
 			return fmt.Errorf("publish poll event: %w", err)
 		}
@@ -106,8 +106,8 @@ func RunCycle(ctx context.Context, fetcher Fetcher, checkpoints CheckpointStore,
 	return nil
 }
 
-func dedupID(entity Entity, action string) string {
-	raw := entity.Provider + "|" + entity.EntityType + "|" + entity.EntityID + "|" + action + "|" + entity.UpdatedAt.UTC().Format(time.RFC3339Nano)
+func dedupID(entity Entity, action, tenantID string) string {
+	raw := entity.Provider + "|" + tenantID + "|" + entity.EntityType + "|" + entity.EntityID + "|" + action + "|" + entity.UpdatedAt.UTC().Format(time.RFC3339Nano)
 	sum := sha256.Sum256([]byte(raw))
 	return "poll_" + hex.EncodeToString(sum[:])
 }

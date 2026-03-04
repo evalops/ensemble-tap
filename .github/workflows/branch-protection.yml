@@ -1,0 +1,28 @@
+name: Branch Protection
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to protect
+        required: true
+        default: main
+
+permissions: {}
+
+jobs:
+  protect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply branch protection
+        env:
+          GH_TOKEN: ${{ secrets.ORG_ADMIN_TOKEN }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "ORG_ADMIN_TOKEN secret is required" >&2
+            exit 1
+          fi
+          .github/scripts/apply_branch_protection.sh "${{ github.repository }}" "${{ github.event.inputs.branch }}"

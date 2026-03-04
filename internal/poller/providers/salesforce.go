@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,6 +16,11 @@ type SalesforceFetcher struct {
 	HTTPClient   *http.Client
 	BaseURL      string
 	AccessToken  string
+	TokenURL     string
+	ClientID     string
+	ClientSecret string
+	RefreshToken string
+	Scope        string
 	APIVersion   string
 	Objects      []string
 	QueryPerPage int
@@ -50,6 +54,14 @@ func (s *SalesforceFetcher) Fetch(ctx context.Context, checkpoint string) (polle
 	entities := make([]poller.Entity, 0)
 	client := clientOrDefault(s.HTTPClient)
 	base := trimTrailingSlash(s.BaseURL)
+	token := strings.TrimSpace(s.AccessToken)
+	oauth := OAuthRefreshConfig{
+		TokenURL:     s.TokenURL,
+		ClientID:     s.ClientID,
+		ClientSecret: s.ClientSecret,
+		RefreshToken: s.RefreshToken,
+		Scope:        s.Scope,
+	}
 
 	for _, object := range objects {
 		soql := fmt.Sprintf("SELECT Id, LastModifiedDate FROM %s", object)
@@ -60,21 +72,17 @@ func (s *SalesforceFetcher) Fetch(ctx context.Context, checkpoint string) (polle
 
 		nextURL := base + "/services/data/" + apiVersion + "/query?q=" + url.QueryEscape(soql)
 		for nextURL != "" {
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, nextURL, nil)
-			if err != nil {
-				return poller.FetchResult{}, fmt.Errorf("build salesforce request: %w", err)
-			}
-			req.Header.Set("Authorization", "Bearer "+s.AccessToken)
-			req.Header.Set("Accept", "application/json")
-
-			resp, err := client.Do(req)
+			body, err := doAuthenticatedRequest(ctx, client, &token, oauth, func(accessToken string) (*http.Request, error) {
+				req, err := http.NewRequestWithContext(ctx, http.MethodGet, nextURL, nil)
+				if err != nil {
+					return nil, fmt.Errorf("build salesforce request: %w", err)
+				}
+				req.Header.Set("Authorization", "Bearer "+accessToken)
+				req.Header.Set("Accept", "application/json")
+				return req, nil
+			})
 			if err != nil {
 				return poller.FetchResult{}, fmt.Errorf("salesforce request failed: %w", err)
-			}
-			body, _ := io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
-			if resp.StatusCode >= 300 {
-				return poller.FetchResult{}, fmt.Errorf("salesforce request failed: status %d", resp.StatusCode)
 			}
 
 			var out struct {
@@ -116,6 +124,7 @@ func (s *SalesforceFetcher) Fetch(ctx context.Context, checkpoint string) (polle
 			}
 		}
 	}
+	s.AccessToken = token
 
 	return poller.FetchResult{Entities: entities, NextCheckpoint: formatCheckpoint(next, checkpoint)}, nil
 }

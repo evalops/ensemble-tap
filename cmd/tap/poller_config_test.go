@@ -1,6 +1,7 @@
 package main
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/evalops/ensemble-tap/config"
@@ -48,5 +49,35 @@ func TestFetcherForProvider(t *testing.T) {
 
 	if unknown := fetcherForProvider("stripe", config.ProviderConfig{}); unknown != nil {
 		t.Fatalf("expected nil fetcher for unsupported provider, got %T", unknown)
+	}
+}
+
+func TestOpenPollStores(t *testing.T) {
+	cp, snap, closer, err := openPollStores(config.StateConfig{Backend: "memory"})
+	if err != nil {
+		t.Fatalf("open memory stores: %v", err)
+	}
+	if closer != nil {
+		t.Fatalf("memory backend should not return closer")
+	}
+	cp.Set("hubspot", "cp")
+	if got, ok := cp.Get("hubspot"); !ok || got != "cp" {
+		t.Fatalf("unexpected memory checkpoint: %q %v", got, ok)
+	}
+	snap.Put("hubspot", "deal", "1", map[string]any{"stage": "open"})
+
+	sqlitePath := filepath.Join(t.TempDir(), "state.db")
+	cp2, _, closer2, err := openPollStores(config.StateConfig{Backend: "sqlite", SQLitePath: sqlitePath})
+	if err != nil {
+		t.Fatalf("open sqlite stores: %v", err)
+	}
+	defer closer2.Close()
+	cp2.Set("hubspot", "cp2")
+	if got, ok := cp2.Get("hubspot"); !ok || got != "cp2" {
+		t.Fatalf("unexpected sqlite checkpoint: %q %v", got, ok)
+	}
+
+	if _, _, _, err := openPollStores(config.StateConfig{Backend: "unknown"}); err == nil {
+		t.Fatalf("expected unsupported backend error")
 	}
 }

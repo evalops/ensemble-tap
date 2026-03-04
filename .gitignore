@@ -3,3 +3,6 @@ config.yaml
 .DS_Store
 bin/
 coverage.out
+tap-state.db
+data/
+dist/

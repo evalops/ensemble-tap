@@ -103,6 +103,45 @@ func TestNATSPublisherEnsureStreamIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestNATSPublisherTenantScopedSubject(t *testing.T) {
+	s := runNATSServer(t)
+	cfg := config.NATSConfig{
+		URL:                  s.ClientURL(),
+		Stream:               "ENSEMBLE_TAP_TENANT_SUBJECT",
+		SubjectPrefix:        "ensemble.tap",
+		TenantScopedSubjects: true,
+		MaxAge:               time.Hour,
+		DedupWindow:          2 * time.Minute,
+	}
+
+	ctx := context.Background()
+	pub, err := NewNATSPublisher(ctx, cfg, nil)
+	if err != nil {
+		t.Fatalf("new publisher: %v", err)
+	}
+	defer pub.Close()
+
+	evt, err := normalize.ToCloudEvent(normalize.NormalizedEvent{
+		Provider:     "stripe",
+		EntityType:   "invoice",
+		EntityID:     "in_1",
+		Action:       "paid",
+		ProviderTime: time.Now().UTC(),
+		TenantID:     "tenant-1",
+	})
+	if err != nil {
+		t.Fatalf("build cloud event: %v", err)
+	}
+
+	subject, err := pub.Publish(ctx, evt, "tenant_subject_1")
+	if err != nil {
+		t.Fatalf("publish event: %v", err)
+	}
+	if subject != "ensemble.tap.tenant_1.stripe.invoice.paid" {
+		t.Fatalf("unexpected subject: %q", subject)
+	}
+}
+
 func runNATSServer(t *testing.T) *natsserver.Server {
 	t.Helper()
 

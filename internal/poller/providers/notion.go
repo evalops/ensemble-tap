@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -14,10 +13,15 @@ import (
 )
 
 type NotionFetcher struct {
-	HTTPClient *http.Client
-	BaseURL    string
-	Token      string
-	PageSize   int
+	HTTPClient   *http.Client
+	BaseURL      string
+	Token        string
+	TokenURL     string
+	ClientID     string
+	ClientSecret string
+	RefreshToken string
+	Scope        string
+	PageSize     int
 }
 
 func (n *NotionFetcher) ProviderName() string { return "notion" }
@@ -40,6 +44,14 @@ func (n *NotionFetcher) Fetch(ctx context.Context, checkpoint string) (poller.Fe
 	entities := make([]poller.Entity, 0)
 	client := clientOrDefault(n.HTTPClient)
 	endpoint := trimTrailingSlash(n.BaseURL) + "/v1/search"
+	token := strings.TrimSpace(n.Token)
+	oauth := OAuthRefreshConfig{
+		TokenURL:     n.TokenURL,
+		ClientID:     n.ClientID,
+		ClientSecret: n.ClientSecret,
+		RefreshToken: n.RefreshToken,
+		Scope:        n.Scope,
+	}
 
 	cursor := ""
 	for {
@@ -62,22 +74,18 @@ func (n *NotionFetcher) Fetch(ctx context.Context, checkpoint string) (poller.Fe
 		}
 		body, _ := json.Marshal(reqBody)
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-		if err != nil {
-			return poller.FetchResult{}, fmt.Errorf("build notion request: %w", err)
-		}
-		req.Header.Set("Authorization", "Bearer "+n.Token)
-		req.Header.Set("Notion-Version", "2022-06-28")
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, err := client.Do(req)
+		respBody, err := doAuthenticatedRequest(ctx, client, &token, oauth, func(accessToken string) (*http.Request, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+			if err != nil {
+				return nil, fmt.Errorf("build notion request: %w", err)
+			}
+			req.Header.Set("Authorization", "Bearer "+accessToken)
+			req.Header.Set("Notion-Version", "2022-06-28")
+			req.Header.Set("Content-Type", "application/json")
+			return req, nil
+		})
 		if err != nil {
 			return poller.FetchResult{}, fmt.Errorf("notion request failed: %w", err)
-		}
-		respBody, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if resp.StatusCode >= 300 {
-			return poller.FetchResult{}, fmt.Errorf("notion request failed: status %d", resp.StatusCode)
 		}
 
 		var out struct {
@@ -119,6 +127,7 @@ func (n *NotionFetcher) Fetch(ctx context.Context, checkpoint string) (poller.Fe
 		}
 		cursor = out.NextCursor
 	}
+	n.Token = token
 
 	return poller.FetchResult{Entities: entities, NextCheckpoint: formatCheckpoint(next, checkpoint)}, nil
 }

@@ -4,27 +4,19 @@ Ensemble Tap is a standalone Go service that ingests SaaS webhook events, normal
 
 ## Implemented Scope
 
-- Phase 1 webhook ingress for:
-  - Stripe
-  - GitHub
-  - HubSpot
-  - Linear
-  - Shopify
-  - Generic HMAC provider fallback
-- CloudEvents normalization (`ensemble.tap.{provider}.{entity_type}.{action}`)
-- NATS JetStream publisher with stream auto-provisioning and dedup IDs (`Nats-Msg-Id`)
-- Optional ClickHouse sink consuming from NATS with batched inserts
-- Health + observability:
+- Webhook ingress for Stripe, GitHub, HubSpot, Linear, Shopify, and generic HMAC providers.
+- Multi-tenant webhook routing via `POST /webhooks/{provider}` and `POST /webhooks/{provider}/{tenant}`.
+- Polling engine with provider pollers for HubSpot, Salesforce, QuickBooks, and Notion.
+- Durable poll state backends (`memory` or `sqlite`).
+- CloudEvents normalization and schema validation (`tapversion=v1`).
+- NATS JetStream publisher with dedup IDs and optional tenant-scoped subjects.
+- Optional ClickHouse sink consuming from NATS with batched inserts.
+- Dead-letter queue recording for verification/normalization/publish failures.
+- Admin DLQ replay endpoint: `POST /admin/replay-dlq?limit=100` guarded by `X-Admin-Token`.
+- Health and observability endpoints:
   - `GET /livez`
   - `GET /readyz`
   - `GET /metrics`
-- Config loading from YAML + `TAP_` env overrides
-- Polling engine with checkpoint + snapshot diff event generation
-- Provider pollers for:
-  - HubSpot (CRM search by `hs_lastmodifieddate`)
-  - Salesforce (SOQL `LastModifiedDate` fallback)
-  - QuickBooks (`MetaData.LastUpdatedTime` query path)
-  - Notion (`/v1/search` with pagination and edited-time filtering)
 
 ## Quickstart
 
@@ -32,16 +24,15 @@ Ensemble Tap is a standalone Go service that ingests SaaS webhook events, normal
 
 ```bash
 cp config.example.yaml config.yaml
-# Fill in provider secrets and endpoints.
 ```
 
-2. Run dependencies + tap:
+2. Start dependencies + tap:
 
 ```bash
 docker compose up --build
 ```
 
-3. Expose webhook URLs:
+3. Send webhooks:
 
 - `POST /webhooks/stripe`
 - `POST /webhooks/github`
@@ -56,7 +47,25 @@ go test ./...
 go run ./cmd/tap -config ./config.yaml
 ```
 
-## Notes
+## Poll State Backends
 
-- For HubSpot verification, Tap uses `X-HubSpot-Signature-v3` and reconstructs the signed URL from forwarded headers when present.
-- ClickHouse is optional; leave `clickhouse.addr` empty to disable it.
+- `state.backend=memory` keeps checkpoints/snapshots in memory.
+- `state.backend=sqlite` persists poll state to `state.sqlite_path`.
+
+## Kubernetes
+
+Install with Helm:
+
+```bash
+helm upgrade --install ensemble-tap ./charts/ensemble-tap \
+  --namespace ensemble \
+  --create-namespace
+```
+
+See chart-specific usage in `charts/ensemble-tap/README.md`.
+
+## Release and Operations
+
+- CI workflow validates unit tests, Docker build, Helm chart render/lint, and real NATS+ClickHouse integration.
+- Tag pushes matching `v*` trigger release workflow to publish multi-arch images to GHCR and package the Helm chart.
+- Branch protection can be applied with `.github/scripts/apply_branch_protection.sh` or via the manual `Branch Protection` workflow.

@@ -40,6 +40,9 @@ type NormalizedEvent struct {
 }
 
 func ToCloudEvent(in NormalizedEvent) (cloudevents.Event, error) {
+	if err := ValidateNormalizedEvent(in); err != nil {
+		return cloudevents.Event{}, err
+	}
 	if in.Provider == "" {
 		return cloudevents.Event{}, fmt.Errorf("provider is required")
 	}
@@ -67,6 +70,7 @@ func ToCloudEvent(in NormalizedEvent) (cloudevents.Event, error) {
 	e.SetSource(fmt.Sprintf("tap/%s/%s", in.Provider, sourceTenant))
 	e.SetSubject(fmt.Sprintf("%s/%s", in.EntityType, in.EntityID))
 	e.SetTime(in.ProviderTime)
+	e.SetExtension("tapversion", TapSchemaVersion)
 
 	data := TapEventData{
 		Provider:        in.Provider,
@@ -83,6 +87,9 @@ func ToCloudEvent(in NormalizedEvent) (cloudevents.Event, error) {
 	}
 	if err := e.SetData(cloudevents.ApplicationJSON, data); err != nil {
 		return cloudevents.Event{}, fmt.Errorf("set cloudevent data: %w", err)
+	}
+	if err := ValidateCloudEvent(e); err != nil {
+		return cloudevents.Event{}, err
 	}
 	return e, nil
 }

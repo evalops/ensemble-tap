@@ -14,14 +14,26 @@ providers:
     client_secret: ${HUBSPOT_CLIENT_SECRET}
     api_key: ${HUBSPOT_API_KEY}
     base_url: https://api.hubapi.com
+    token_url: ${HUBSPOT_TOKEN_URL}
+    client_id: ${HUBSPOT_CLIENT_ID}
+    refresh_token: ${HUBSPOT_REFRESH_TOKEN}
     objects: ["deals", "contacts", "companies", "tickets"]
     query_per_page: 100
     poll_interval: 60s
+    tenants:
+      tenant-a:
+        secret: ${HUBSPOT_TENANT_A_WEBHOOK_SECRET}
+        access_token: ${HUBSPOT_TENANT_A_ACCESS_TOKEN}
+        refresh_token: ${HUBSPOT_TENANT_A_REFRESH_TOKEN}
 
   salesforce:
     mode: poll
     base_url: ${SALESFORCE_BASE_URL}
     access_token: ${SALESFORCE_ACCESS_TOKEN}
+    token_url: ${SALESFORCE_TOKEN_URL}
+    client_id: ${SALESFORCE_CLIENT_ID}
+    client_secret: ${SALESFORCE_CLIENT_SECRET}
+    refresh_token: ${SALESFORCE_REFRESH_TOKEN}
     api_version: v59.0
     objects: ["Opportunity"]
     query_per_page: 200
@@ -31,6 +43,10 @@ providers:
     mode: poll
     base_url: https://quickbooks.api.intuit.com
     access_token: ${QBO_ACCESS_TOKEN}
+    token_url: ${QBO_TOKEN_URL}
+    client_id: ${QBO_CLIENT_ID}
+    client_secret: ${QBO_CLIENT_SECRET}
+    refresh_token: ${QBO_REFRESH_TOKEN}
     realm_id: ${QBO_REALM_ID}
     objects: ["Customer"]
     query_per_page: 100
@@ -40,6 +56,10 @@ providers:
     mode: poll
     base_url: https://api.notion.com
     access_token: ${NOTION_TOKEN}
+    token_url: ${NOTION_TOKEN_URL}
+    client_id: ${NOTION_CLIENT_ID}
+    client_secret: ${NOTION_CLIENT_SECRET}
+    refresh_token: ${NOTION_REFRESH_TOKEN}
     query_per_page: 100
     poll_interval: 120s
 
@@ -55,6 +75,7 @@ nats:
   url: nats://localhost:4222
   stream: ENSEMBLE_TAP
   subject_prefix: ensemble.tap
+  tenant_scoped_subjects: false
   max_age: 168h
   dedup_window: 2m
 
@@ -71,3 +92,8 @@ server:
   read_timeout: 10s
   write_timeout: 5s
   max_body_size: 1048576
+  admin_token: ${TAP_ADMIN_TOKEN}
+
+state:
+  backend: sqlite
+  sqlite_path: ./data/tap-state.db

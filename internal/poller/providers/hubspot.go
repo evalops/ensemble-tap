@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,11 +14,16 @@ import (
 )
 
 type HubSpotFetcher struct {
-	HTTPClient *http.Client
-	BaseURL    string
-	Token      string
-	Objects    []string
-	Limit      int
+	HTTPClient   *http.Client
+	BaseURL      string
+	Token        string
+	TokenURL     string
+	ClientID     string
+	ClientSecret string
+	RefreshToken string
+	Scope        string
+	Objects      []string
+	Limit        int
 }
 
 func (h *HubSpotFetcher) ProviderName() string { return "hubspot" }
@@ -45,6 +49,14 @@ func (h *HubSpotFetcher) Fetch(ctx context.Context, checkpoint string) (poller.F
 	next := cp
 	entities := make([]poller.Entity, 0)
 	client := clientOrDefault(h.HTTPClient)
+	token := strings.TrimSpace(h.Token)
+	oauth := OAuthRefreshConfig{
+		TokenURL:     h.TokenURL,
+		ClientID:     h.ClientID,
+		ClientSecret: h.ClientSecret,
+		RefreshToken: h.RefreshToken,
+		Scope:        h.Scope,
+	}
 
 	for _, object := range objects {
 		reqPayload := map[string]any{"limit": limit}
@@ -58,21 +70,17 @@ func (h *HubSpotFetcher) Fetch(ctx context.Context, checkpoint string) (poller.F
 		body, _ := json.Marshal(reqPayload)
 
 		url := trimTrailingSlash(h.BaseURL) + "/crm/v3/objects/" + strings.TrimSpace(object) + "/search"
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-		if err != nil {
-			return poller.FetchResult{}, fmt.Errorf("build hubspot request: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+h.Token)
-
-		resp, err := client.Do(req)
+		respBody, err := doAuthenticatedRequest(ctx, client, &token, oauth, func(accessToken string) (*http.Request, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+			if err != nil {
+				return nil, fmt.Errorf("build hubspot request: %w", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+accessToken)
+			return req, nil
+		})
 		if err != nil {
 			return poller.FetchResult{}, fmt.Errorf("hubspot request failed: %w", err)
-		}
-		respBody, _ := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if resp.StatusCode >= 300 {
-			return poller.FetchResult{}, fmt.Errorf("hubspot request failed: status %d", resp.StatusCode)
 		}
 
 		var out struct {
@@ -104,6 +112,7 @@ func (h *HubSpotFetcher) Fetch(ctx context.Context, checkpoint string) (poller.F
 			})
 		}
 	}
+	h.Token = token
 
 	return poller.FetchResult{Entities: entities, NextCheckpoint: formatCheckpoint(next, checkpoint)}, nil
 }
