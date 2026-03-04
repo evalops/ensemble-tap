@@ -48,9 +48,11 @@ func NewClickHouseSink(ctx context.Context, cfg config.ClickHouseConfig, natsCfg
 	if strings.TrimSpace(cfg.Addr) == "" {
 		return nil, nil
 	}
+
+	// Connect to default first so schema bootstrap can create cfg.Database when missing.
 	conn, err := clickhouse.Open(&clickhouse.Options{
 		Addr: []string{cfg.Addr},
-		Auth: clickhouse.Auth{Database: cfg.Database},
+		Auth: clickhouse.Auth{Database: "default"},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open clickhouse: %w", err)
