@@ -77,8 +77,8 @@ When `server.admin_token` is set, these endpoints are available:
   - Replay execution is configurable (`server.admin_replay_job_timeout`, `server.admin_replay_max_concurrent_jobs`) for bounded runtime and concurrency.
 - `GET /admin/replay-dlq`
   - Requires header `X-Admin-Token`.
-  - Optional query params: `status` (`queued|running|succeeded|failed`) and `limit` (max `500`, default `50`).
-  - Returns replay job list plus per-status summary counts for quick queue introspection.
+  - Optional query params: `status` (`queued|running|succeeded|failed`), `limit` (max `500`, default `50`), and `cursor` (from prior `next_cursor`).
+  - Returns replay job list plus per-status summary counts and pagination cursors for queue introspection.
 - `GET /admin/replay-dlq/{job_id}`
   - Requires header `X-Admin-Token`.
   - Returns current replay job state (`queued`, `running`, `succeeded`, `failed`) and result fields (`replayed`, `error`).
@@ -114,6 +114,11 @@ curl -i -X POST 'http://localhost:8080/admin/replay-dlq?limit=200&dry_run=true' 
 curl -i 'http://localhost:8080/admin/replay-dlq?status=succeeded&limit=20' \
   -H 'X-Admin-Token: your-admin-token' \
   -H 'X-Request-ID: replay-list-001'
+
+# Replay job list next page
+curl -i 'http://localhost:8080/admin/replay-dlq?status=succeeded&limit=20&cursor=<next_cursor_from_previous_response>' \
+  -H 'X-Admin-Token: your-admin-token' \
+  -H 'X-Request-ID: replay-list-002'
 
 # Replay job status
 curl -i 'http://localhost:8080/admin/replay-dlq/replay_1234567890_1' \

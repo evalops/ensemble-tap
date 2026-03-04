@@ -27,6 +27,12 @@ paths:
             minimum: 1
             maximum: 500
           description: Maximum number of jobs returned (default 50).
+        - in: query
+          name: cursor
+          required: false
+          schema:
+            type: string
+          description: Opaque cursor from previous response `next_cursor` for pagination.
         - in: header
           name: X-Request-ID
           required: false
@@ -285,6 +291,10 @@ components:
           type: integer
           minimum: 1
           maximum: 500
+        cursor:
+          type: string
+        next_cursor:
+          type: string
         count:
           type: integer
           minimum: 0

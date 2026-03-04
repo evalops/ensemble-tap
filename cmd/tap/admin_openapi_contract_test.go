@@ -134,10 +134,22 @@ func TestAdminOpenAPIContractMatchesRuntime(t *testing.T) {
 	replayConflictReq.Header.Set("Idempotency-Key", "openapi-idem-1")
 	_, _ = validateRoundTrip(replayConflictReq, http.StatusConflict)
 
-	replayListReq, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+intToString(port)+"/admin/replay-dlq?status=succeeded&limit=5", nil)
+	replayListReq, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+intToString(port)+"/admin/replay-dlq?status=succeeded&limit=1", nil)
 	replayListReq.Header.Set("X-Admin-Token", "test-admin-token")
 	replayListReq.Header.Set("X-Request-ID", "openapi-replay-list-1")
-	_, _ = validateRoundTrip(replayListReq, http.StatusOK)
+	replayListBody, _ := validateRoundTrip(replayListReq, http.StatusOK)
+	var replayListResp struct {
+		NextCursor string `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(replayListBody, &replayListResp); err != nil {
+		t.Fatalf("decode replay list response: %v", err)
+	}
+	if replayListResp.NextCursor != "" {
+		replayListNextReq, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+intToString(port)+"/admin/replay-dlq?status=succeeded&limit=1&cursor="+replayListResp.NextCursor, nil)
+		replayListNextReq.Header.Set("X-Admin-Token", "test-admin-token")
+		replayListNextReq.Header.Set("X-Request-ID", "openapi-replay-list-2")
+		_, _ = validateRoundTrip(replayListNextReq, http.StatusOK)
+	}
 
 	statusReq, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+intToString(port)+"/admin/replay-dlq/"+replayResp.Job.JobID, nil)
 	statusReq.Header.Set("X-Admin-Token", "test-admin-token")

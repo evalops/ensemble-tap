@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -308,6 +309,37 @@ func TestParseReplayJobStatusFilter(t *testing.T) {
 	}
 }
 
+func TestParseReplayJobCursor(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Nanosecond)
+	cursor := encodeReplayJobCursor(adminReplayJobSnapshot{
+		JobID:     "replay_cursor_1",
+		CreatedAt: now,
+	})
+	createdAt, jobID, err := parseReplayJobCursor(cursor)
+	if err != nil {
+		t.Fatalf("expected valid replay cursor, got error: %v", err)
+	}
+	if !createdAt.Equal(now) || jobID != "replay_cursor_1" {
+		t.Fatalf("unexpected parsed cursor values: created_at=%s job_id=%s", createdAt, jobID)
+	}
+
+	if _, _, err := parseReplayJobCursor("%%%"); err == nil {
+		t.Fatalf("expected malformed cursor encoding to fail")
+	}
+	invalidPayload := base64.RawURLEncoding.EncodeToString([]byte("oops"))
+	if _, _, err := parseReplayJobCursor(invalidPayload); err == nil {
+		t.Fatalf("expected malformed cursor payload to fail")
+	}
+	invalidTimestamp := base64.RawURLEncoding.EncodeToString([]byte("not-a-number|replay_1"))
+	if _, _, err := parseReplayJobCursor(invalidTimestamp); err == nil {
+		t.Fatalf("expected malformed cursor timestamp to fail")
+	}
+	missingJobID := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf("%d|", now.UnixNano())))
+	if _, _, err := parseReplayJobCursor(missingJobID); err == nil {
+		t.Fatalf("expected missing cursor job id to fail")
+	}
+}
+
 func TestAdminRetryAfterSeconds(t *testing.T) {
 	tests := []struct {
 		limit float64
@@ -498,15 +530,18 @@ func TestAdminReplayJobRegistryList(t *testing.T) {
 	registry.MarkSucceeded(first.JobID, 3)
 	registry.MarkFailed(second.JobID, "replay error")
 
-	allJobs, summary := registry.List("", 10)
+	allJobs, summary, nextCursor := registry.List("", 10, time.Time{}, "")
 	if len(allJobs) != 2 {
 		t.Fatalf("expected list all jobs count=2, got %d", len(allJobs))
+	}
+	if nextCursor != "" {
+		t.Fatalf("expected no next cursor when limit exceeds result set, got %q", nextCursor)
 	}
 	if summary[adminReplayJobStatusSucceeded] != 1 || summary[adminReplayJobStatusFailed] != 1 {
 		t.Fatalf("unexpected replay list summary: %+v", summary)
 	}
 
-	succeededJobs, succeededSummary := registry.List(adminReplayJobStatusSucceeded, 10)
+	succeededJobs, succeededSummary, _ := registry.List(adminReplayJobStatusSucceeded, 10, time.Time{}, "")
 	if len(succeededJobs) != 1 || succeededJobs[0].JobID != first.JobID {
 		t.Fatalf("expected only succeeded job %q, got %+v", first.JobID, succeededJobs)
 	}
@@ -514,9 +549,26 @@ func TestAdminReplayJobRegistryList(t *testing.T) {
 		t.Fatalf("expected summary to reflect all statuses, got %+v", succeededSummary)
 	}
 
-	limitedJobs, _ := registry.List("", 1)
+	limitedJobs, _, limitedNextCursor := registry.List("", 1, time.Time{}, "")
 	if len(limitedJobs) != 1 {
 		t.Fatalf("expected replay list limit=1 to return 1 job, got %d", len(limitedJobs))
+	}
+	if strings.TrimSpace(limitedNextCursor) == "" {
+		t.Fatalf("expected replay list limit=1 to return next cursor")
+	}
+	cursorCreatedAt, cursorJobID, err := parseReplayJobCursor(limitedNextCursor)
+	if err != nil {
+		t.Fatalf("parse list cursor: %v", err)
+	}
+	secondPage, _, secondNextCursor := registry.List("", 1, cursorCreatedAt, cursorJobID)
+	if len(secondPage) != 1 {
+		t.Fatalf("expected second replay list page count=1, got %d", len(secondPage))
+	}
+	if secondPage[0].JobID == limitedJobs[0].JobID {
+		t.Fatalf("expected second page job to differ from first page")
+	}
+	if secondNextCursor != "" {
+		t.Fatalf("expected no further cursor on second page, got %q", secondNextCursor)
 	}
 }
 
@@ -946,7 +998,23 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 		t.Fatalf("unexpected invalid replay list status payload: %+v", listInvalidErr)
 	}
 
-	reqListSucceeded, _ := http.NewRequest(http.MethodGet, replayBaseURL+"?status=succeeded&limit=5", nil)
+	reqListBadCursor, _ := http.NewRequest(http.MethodGet, replayBaseURL+"?cursor=a", nil)
+	reqListBadCursor.Header.Set("X-Admin-Token", "test-admin-token")
+	reqListBadCursor.Header.Set("X-Request-ID", "replay-list-cursor-1")
+	respListBadCursor, err := http.DefaultClient.Do(reqListBadCursor)
+	if err != nil {
+		t.Fatalf("request replay list invalid cursor: %v", err)
+	}
+	if respListBadCursor.StatusCode != http.StatusBadRequest {
+		_ = respListBadCursor.Body.Close()
+		t.Fatalf("expected 400 for invalid replay list cursor, got %d", respListBadCursor.StatusCode)
+	}
+	listBadCursorErr := readAdminError(respListBadCursor)
+	if listBadCursorErr.RequestID != "replay-list-cursor-1" || !strings.Contains(listBadCursorErr.Error, "invalid cursor") {
+		t.Fatalf("unexpected invalid replay list cursor payload: %+v", listBadCursorErr)
+	}
+
+	reqListSucceeded, _ := http.NewRequest(http.MethodGet, replayBaseURL+"?status=succeeded&limit=1", nil)
 	reqListSucceeded.Header.Set("X-Admin-Token", "test-admin-token")
 	reqListSucceeded.Header.Set("X-Request-ID", "replay-list-success-1")
 	respListSucceeded, err := http.DefaultClient.Do(reqListSucceeded)
@@ -958,12 +1026,14 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 		t.Fatalf("expected 200 for replay list, got %d", respListSucceeded.StatusCode)
 	}
 	var listSucceeded struct {
-		RequestID string              `json:"request_id"`
-		Status    string              `json:"status"`
-		Limit     int                 `json:"limit"`
-		Count     int                 `json:"count"`
-		Summary   map[string]int      `json:"summary"`
-		Jobs      []replayJobSnapshot `json:"jobs"`
+		RequestID  string              `json:"request_id"`
+		Status     string              `json:"status"`
+		Limit      int                 `json:"limit"`
+		Cursor     string              `json:"cursor"`
+		NextCursor string              `json:"next_cursor"`
+		Count      int                 `json:"count"`
+		Summary    map[string]int      `json:"summary"`
+		Jobs       []replayJobSnapshot `json:"jobs"`
 	}
 	listBody, err := io.ReadAll(respListSucceeded.Body)
 	_ = respListSucceeded.Body.Close()
@@ -976,8 +1046,11 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 	if listSucceeded.RequestID != "replay-list-success-1" {
 		t.Fatalf("unexpected replay list request id: %+v", listSucceeded)
 	}
-	if listSucceeded.Status != "succeeded" || listSucceeded.Limit != 5 {
+	if listSucceeded.Status != "succeeded" || listSucceeded.Limit != 1 {
 		t.Fatalf("unexpected replay list filters: %+v", listSucceeded)
+	}
+	if listSucceeded.Cursor != "" {
+		t.Fatalf("expected first replay list page to have empty cursor, got %q", listSucceeded.Cursor)
 	}
 	if listSucceeded.Count < 1 || len(listSucceeded.Jobs) < 1 {
 		t.Fatalf("expected replay list to return succeeded jobs, got %+v", listSucceeded)
@@ -989,6 +1062,48 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 		if listed.Status != adminReplayJobStatusSucceeded {
 			t.Fatalf("expected filtered replay list status=succeeded, got %+v", listed)
 		}
+	}
+	if strings.TrimSpace(listSucceeded.NextCursor) == "" {
+		t.Fatalf("expected replay list first page to include next_cursor, got %+v", listSucceeded)
+	}
+
+	reqListSucceededNext, _ := http.NewRequest(http.MethodGet, replayBaseURL+"?status=succeeded&limit=1&cursor="+listSucceeded.NextCursor, nil)
+	reqListSucceededNext.Header.Set("X-Admin-Token", "test-admin-token")
+	reqListSucceededNext.Header.Set("X-Request-ID", "replay-list-success-2")
+	respListSucceededNext, err := http.DefaultClient.Do(reqListSucceededNext)
+	if err != nil {
+		t.Fatalf("request replay list second page: %v", err)
+	}
+	if respListSucceededNext.StatusCode != http.StatusOK {
+		_ = respListSucceededNext.Body.Close()
+		t.Fatalf("expected 200 for replay list second page, got %d", respListSucceededNext.StatusCode)
+	}
+	var listSucceededNext struct {
+		RequestID  string              `json:"request_id"`
+		Status     string              `json:"status"`
+		Limit      int                 `json:"limit"`
+		Cursor     string              `json:"cursor"`
+		NextCursor string              `json:"next_cursor"`
+		Count      int                 `json:"count"`
+		Summary    map[string]int      `json:"summary"`
+		Jobs       []replayJobSnapshot `json:"jobs"`
+	}
+	listNextBody, err := io.ReadAll(respListSucceededNext.Body)
+	_ = respListSucceededNext.Body.Close()
+	if err != nil {
+		t.Fatalf("read replay list second body: %v", err)
+	}
+	if err := json.Unmarshal(listNextBody, &listSucceededNext); err != nil {
+		t.Fatalf("decode replay list second body: %v body=%s", err, string(listNextBody))
+	}
+	if listSucceededNext.RequestID != "replay-list-success-2" || listSucceededNext.Cursor != listSucceeded.NextCursor {
+		t.Fatalf("unexpected replay list second page payload: %+v", listSucceededNext)
+	}
+	if len(listSucceededNext.Jobs) < 1 {
+		t.Fatalf("expected second replay list page to include jobs, got %+v", listSucceededNext)
+	}
+	if listSucceededNext.Jobs[0].JobID == listSucceeded.Jobs[0].JobID {
+		t.Fatalf("expected second replay list page to advance cursor; got same job id %q", listSucceeded.Jobs[0].JobID)
 	}
 
 	reqMissingStatus, _ := http.NewRequest(http.MethodGet, replayBaseURL+"/missing-job-id", nil)

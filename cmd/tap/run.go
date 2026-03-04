@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -281,15 +282,36 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 				writeAdminError(w, http.StatusBadRequest, access.RequestID, err.Error())
 				return
 			}
-			jobs, summary := replayJobs.List(statusFilter, listLimit)
+			cursorRaw := strings.TrimSpace(r.URL.Query().Get("cursor"))
+			cursorCreatedAt, cursorJobID, err := parseReplayJobCursor(cursorRaw)
+			if err != nil {
+				observeAdmin(adminEndpointReplayDLQList, adminOutcomeBadRequest, startedAt)
+				logger.Warn("admin replay dlq list rejected",
+					"path", r.URL.Path,
+					"method", r.Method,
+					"endpoint", adminEndpointReplayDLQList,
+					"request_id", access.RequestID,
+					"token_slot", access.TokenSlot,
+					"requester_ip", access.RequestIP,
+					"user_agent", access.UserAgent,
+					"cursor_raw", cursorRaw,
+					"error", err.Error(),
+					"duration_ms", time.Since(startedAt).Milliseconds(),
+				)
+				writeAdminError(w, http.StatusBadRequest, access.RequestID, err.Error())
+				return
+			}
+			jobs, summary, nextCursor := replayJobs.List(statusFilter, listLimit, cursorCreatedAt, cursorJobID)
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"request_id": access.RequestID,
-				"status":     statusFilter,
-				"limit":      listLimit,
-				"count":      len(jobs),
-				"summary":    summary,
-				"jobs":       jobs,
+				"request_id":  access.RequestID,
+				"status":      statusFilter,
+				"limit":       listLimit,
+				"cursor":      cursorRaw,
+				"next_cursor": nextCursor,
+				"count":       len(jobs),
+				"summary":     summary,
+				"jobs":        jobs,
 			})
 			observeAdmin(adminEndpointReplayDLQList, adminOutcomeSuccess, startedAt)
 			logger.Info("admin replay dlq list fetched",
@@ -302,6 +324,8 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 				"user_agent", access.UserAgent,
 				"status_filter", statusFilter,
 				"limit", listLimit,
+				"cursor_present", cursorRaw != "",
+				"next_cursor_present", nextCursor != "",
 				"count", len(jobs),
 				"duration_ms", time.Since(startedAt).Milliseconds(),
 			)
@@ -647,6 +671,38 @@ func parseReplayJobStatusFilter(raw string) (string, error) {
 	default:
 		return "", fmt.Errorf("invalid status %q: must be one of queued|running|succeeded|failed", strings.TrimSpace(raw))
 	}
+}
+
+func parseReplayJobCursor(raw string) (time.Time, string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, "", nil
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return time.Time{}, "", fmt.Errorf("invalid cursor: malformed encoding")
+	}
+	parts := strings.SplitN(string(decoded), "|", 2)
+	if len(parts) != 2 {
+		return time.Time{}, "", fmt.Errorf("invalid cursor: malformed payload")
+	}
+	nanos, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
+	if err != nil {
+		return time.Time{}, "", fmt.Errorf("invalid cursor: bad timestamp")
+	}
+	jobID := strings.TrimSpace(parts[1])
+	if jobID == "" {
+		return time.Time{}, "", fmt.Errorf("invalid cursor: missing job id")
+	}
+	return time.Unix(0, nanos).UTC(), jobID, nil
+}
+
+func encodeReplayJobCursor(job adminReplayJobSnapshot) string {
+	if job.CreatedAt.IsZero() || strings.TrimSpace(job.JobID) == "" {
+		return ""
+	}
+	raw := fmt.Sprintf("%d|%s", job.CreatedAt.UTC().UnixNano(), strings.TrimSpace(job.JobID))
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
 }
 
 func adminRetryAfterSeconds(limitPerSec float64) int {
@@ -1038,8 +1094,9 @@ func (r *adminReplayJobRegistry) getByIdempotencyKeyLocked(key string) (adminRep
 	return job.snapshot, true
 }
 
-func (r *adminReplayJobRegistry) List(statusFilter string, limit int) ([]adminReplayJobSnapshot, map[string]int) {
+func (r *adminReplayJobRegistry) List(statusFilter string, limit int, cursorCreatedAt time.Time, cursorJobID string) ([]adminReplayJobSnapshot, map[string]int, string) {
 	statusFilter = strings.ToLower(strings.TrimSpace(statusFilter))
+	cursorJobID = strings.TrimSpace(cursorJobID)
 	if limit <= 0 {
 		limit = defaultReplayListLimit
 	}
@@ -1053,7 +1110,7 @@ func (r *adminReplayJobRegistry) List(statusFilter string, limit int) ([]adminRe
 		adminReplayJobStatusFailed:    0,
 	}
 	if r == nil {
-		return []adminReplayJobSnapshot{}, summary
+		return []adminReplayJobSnapshot{}, summary, ""
 	}
 	now := time.Now().UTC()
 	r.mu.Lock()
@@ -1081,10 +1138,37 @@ func (r *adminReplayJobRegistry) List(statusFilter string, limit int) ([]adminRe
 		}
 		return left.CreatedAt.After(right.CreatedAt)
 	})
-	if len(out) > limit {
+
+	if !cursorCreatedAt.IsZero() && cursorJobID != "" {
+		filtered := make([]adminReplayJobSnapshot, 0, len(out))
+		for _, job := range out {
+			if replayJobComesAfterCursor(job, cursorCreatedAt, cursorJobID) {
+				filtered = append(filtered, job)
+			}
+		}
+		out = filtered
+	}
+
+	nextCursor := ""
+	hasMore := len(out) > limit
+	if hasMore {
 		out = out[:limit]
 	}
-	return out, summary
+	if hasMore && len(out) == limit {
+		last := out[len(out)-1]
+		nextCursor = encodeReplayJobCursor(last)
+	}
+	return out, summary, nextCursor
+}
+
+func replayJobComesAfterCursor(candidate adminReplayJobSnapshot, cursorCreatedAt time.Time, cursorJobID string) bool {
+	if candidate.CreatedAt.Before(cursorCreatedAt) {
+		return true
+	}
+	if candidate.CreatedAt.After(cursorCreatedAt) {
+		return false
+	}
+	return strings.TrimSpace(candidate.JobID) < strings.TrimSpace(cursorJobID)
 }
 
 func (r *adminReplayJobRegistry) MarkRunning(jobID string) {
