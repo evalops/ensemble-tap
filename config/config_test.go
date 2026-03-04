@@ -64,6 +64,9 @@ func TestLoadConfigMissingFileAppliesDefaults(t *testing.T) {
 	if cfg.Server.BasePath != "/webhooks" {
 		t.Fatalf("expected default base path, got %q", cfg.Server.BasePath)
 	}
+	if cfg.Server.AdminReplayMaxLimit != 2000 {
+		t.Fatalf("expected default admin replay max limit 2000, got %d", cfg.Server.AdminReplayMaxLimit)
+	}
 }
 
 func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
@@ -71,6 +74,8 @@ func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
 
 	t.Setenv("TAP_NATS_SUBJECT_PREFIX", "ensemble.tap.custom")
 	t.Setenv("TAP_SERVER_MAX_BODY_SIZE", "2097152")
+	t.Setenv("TAP_SERVER_ADMIN_REPLAY_MAX_LIMIT", "1234")
+	t.Setenv("TAP_SERVER_ADMIN_TOKEN_SECONDARY", "next-admin-token")
 	t.Setenv("TAP_CLICKHOUSE_FLUSH_INTERVAL", "3s")
 	t.Setenv("TAP_PROVIDERS_STRIPE_SECRET", "whsec_env")
 	t.Setenv("TAP_PROVIDERS_HUBSPOT_CLIENT_SECRET", "hs_client_secret")
@@ -85,6 +90,12 @@ func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
 	}
 	if cfg.Server.MaxBodySize != 2097152 {
 		t.Fatalf("expected server.max_body_size override, got %d", cfg.Server.MaxBodySize)
+	}
+	if cfg.Server.AdminReplayMaxLimit != 1234 {
+		t.Fatalf("expected server.admin_replay_max_limit override, got %d", cfg.Server.AdminReplayMaxLimit)
+	}
+	if cfg.Server.AdminTokenSecondary != "next-admin-token" {
+		t.Fatalf("expected server.admin_token_secondary override")
 	}
 	if cfg.ClickHouse.FlushInterval != 3*time.Second {
 		t.Fatalf("expected clickhouse.flush_interval override, got %s", cfg.ClickHouse.FlushInterval)

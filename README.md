@@ -61,15 +61,18 @@ When `server.admin_token` is set, these endpoints are available:
 
 - `POST /admin/replay-dlq?limit=100`
   - Requires header `X-Admin-Token`.
+  - Supports token rotation with `server.admin_token_secondary` (either primary or secondary token is accepted).
   - Optional header `X-Request-ID` (echoed back in `X-Request-ID` response header and `request_id` body field).
   - `limit` must be a positive integer.
-  - Replay is capped at `2000` per request; response includes `requested_limit`, `effective_limit`, `max_limit`, and `capped`.
+  - Replay is capped by `server.admin_replay_max_limit` (default `2000`); response includes `requested_limit`, `effective_limit`, `max_limit`, and `capped`.
 - `GET /admin/poller-status`
   - Requires header `X-Admin-Token`.
+  - Supports token rotation with `server.admin_token_secondary`.
   - Optional header `X-Request-ID` (echoed back in `X-Request-ID` response header and `request_id` body field).
   - Optional filters: `provider` (case-insensitive), `tenant`.
   - Response includes `count` and per-poller runtime fields (`interval`, rate limiter values, failure budget, circuit-break duration, jitter ratio, last run/success/error details).
   - Structured audit logs are emitted for authorized and unauthorized admin calls (`request_id`, requester IP, user-agent, path/method, and duration).
+  - Prometheus metrics include `tap_admin_requests_total{endpoint,outcome}` and `tap_admin_request_duration_seconds{endpoint,outcome}`.
 
 ## Kubernetes
 

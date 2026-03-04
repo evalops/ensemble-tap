@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -146,6 +147,21 @@ func TestSecureTokenEqual(t *testing.T) {
 	}
 }
 
+func TestAuthorizeAdminToken(t *testing.T) {
+	if ok, slot := authorizeAdminToken("token-a", "token-a", "token-b"); !ok || slot != "primary" {
+		t.Fatalf("expected primary token match, got ok=%v slot=%q", ok, slot)
+	}
+	if ok, slot := authorizeAdminToken("token-b", "token-a", "token-b"); !ok || slot != "secondary" {
+		t.Fatalf("expected secondary token match, got ok=%v slot=%q", ok, slot)
+	}
+	if ok, slot := authorizeAdminToken("token-c", "token-a", "token-b"); ok || slot != "" {
+		t.Fatalf("expected unauthorized token, got ok=%v slot=%q", ok, slot)
+	}
+	if ok, slot := authorizeAdminToken("token-b", "token-a", ""); ok || slot != "" {
+		t.Fatalf("expected no secondary match when secondary token not configured, got ok=%v slot=%q", ok, slot)
+	}
+}
+
 func TestParseReplayDLQLimit(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -166,7 +182,7 @@ func TestParseReplayDLQLimit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req, eff, capped, err := parseReplayDLQLimit(tt.raw)
+			req, eff, capped, err := parseReplayDLQLimit(tt.raw, maxReplayDLQLimit)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got nil")
@@ -183,6 +199,14 @@ func TestParseReplayDLQLimit(t *testing.T) {
 				t.Fatalf("unexpected parse result: req=%d eff=%d capped=%v", req, eff, capped)
 			}
 		})
+	}
+
+	req, eff, capped, err := parseReplayDLQLimit("99999", 500)
+	if err != nil {
+		t.Fatalf("unexpected error with custom max limit: %v", err)
+	}
+	if req != 99999 || eff != 500 || !capped {
+		t.Fatalf("expected custom max cap to apply, got req=%d eff=%d capped=%v", req, eff, capped)
 	}
 }
 
@@ -246,6 +270,7 @@ func TestPollerStatusRegistrySnapshotFiltered(t *testing.T) {
 func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 	s := runNATSServer(t)
 	port := freePort(t)
+	const replayMaxLimit = 1500
 	cfg := config.Config{
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
@@ -255,10 +280,12 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 			DedupWindow:   time.Minute,
 		},
 		Server: config.ServerConfig{
-			Port:        port,
-			BasePath:    "/webhooks",
-			MaxBodySize: 1 << 20,
-			AdminToken:  "test-admin-token",
+			Port:                port,
+			BasePath:            "/webhooks",
+			MaxBodySize:         1 << 20,
+			AdminToken:          "test-admin-token",
+			AdminTokenSecondary: "next-admin-token",
+			AdminReplayMaxLimit: replayMaxLimit,
 		},
 	}
 	cfg.ApplyDefaults()
@@ -395,7 +422,7 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 		replayResult.RequestID != "replay-success-1" ||
 		replayResult.RequestedLimit != 1 ||
 		replayResult.EffectiveLimit != 1 ||
-		replayResult.MaxLimit != maxReplayDLQLimit ||
+		replayResult.MaxLimit != replayMaxLimit ||
 		replayResult.Capped {
 		t.Fatalf("unexpected replay response: %+v", replayResult)
 	}
@@ -408,7 +435,7 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 		t.Fatalf("unexpected replay payload: %s", string(got.Data))
 	}
 	reqWithCap, _ := http.NewRequest(http.MethodPost, replayBaseURL+"?limit=99999", nil)
-	reqWithCap.Header.Set("X-Admin-Token", "test-admin-token")
+	reqWithCap.Header.Set("X-Admin-Token", "next-admin-token")
 	reqWithCap.Header.Set("X-Request-ID", "replay-cap-1")
 	reqWithCap.Header.Set("X-Forwarded-For", "203.0.113.53")
 	reqWithCap.Header.Set("User-Agent", "tap-admin-test/cap")
@@ -435,8 +462,8 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 	}
 	if cappedResult.RequestID != "replay-cap-1" ||
 		cappedResult.RequestedLimit != 99999 ||
-		cappedResult.EffectiveLimit != maxReplayDLQLimit ||
-		cappedResult.MaxLimit != maxReplayDLQLimit ||
+		cappedResult.EffectiveLimit != replayMaxLimit ||
+		cappedResult.MaxLimit != replayMaxLimit ||
 		!cappedResult.Capped {
 		t.Fatalf("unexpected capped replay response: %+v", cappedResult)
 	}
@@ -508,9 +535,11 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 		effective, okEffective := logFieldInt(entry, "effective_limit")
 		capped, okCapped := entry["capped"].(bool)
 		durationMS, okDuration := logFieldInt(entry, "duration_ms")
-		return okRequestID && okEffective && okCapped && okDuration &&
+		tokenSlot, okTokenSlot := entry["token_slot"].(string)
+		return okRequestID && okEffective && okCapped && okDuration && okTokenSlot &&
 			requestID == "replay-cap-1" &&
-			effective == maxReplayDLQLimit &&
+			effective == replayMaxLimit &&
+			tokenSlot == "secondary" &&
 			capped &&
 			durationMS >= 0
 	}); !ok {
@@ -519,6 +548,23 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 	if _, exists := replayLog["requester_ip"]; !exists {
 		t.Fatalf("expected replay audit log to include requester_ip")
 	}
+	metricsText := fetchMetricsBody(t, "http://127.0.0.1:"+intToString(port)+"/metrics")
+	assertMetricAtLeast(t, metricsText, "tap_admin_requests_total", map[string]string{
+		"endpoint": adminEndpointReplayDLQ,
+		"outcome":  adminOutcomeUnauthorized,
+	}, 1)
+	assertMetricAtLeast(t, metricsText, "tap_admin_requests_total", map[string]string{
+		"endpoint": adminEndpointReplayDLQ,
+		"outcome":  adminOutcomeBadRequest,
+	}, 1)
+	assertMetricAtLeast(t, metricsText, "tap_admin_requests_total", map[string]string{
+		"endpoint": adminEndpointReplayDLQ,
+		"outcome":  adminOutcomeSuccess,
+	}, 2)
+	assertMetricAtLeast(t, metricsText, "tap_admin_request_duration_seconds_count", map[string]string{
+		"endpoint": adminEndpointReplayDLQ,
+		"outcome":  adminOutcomeSuccess,
+	}, 2)
 
 	cancel()
 	select {
@@ -774,6 +820,19 @@ func TestRunAdminPollerStatusEndpoint(t *testing.T) {
 	}); !ok {
 		t.Fatalf("expected tenant-filter poller status audit log with poller_count=0; logs=%s", logBuf.String())
 	}
+	metricsText := fetchMetricsBody(t, "http://127.0.0.1:"+intToString(port)+"/metrics")
+	assertMetricAtLeast(t, metricsText, "tap_admin_requests_total", map[string]string{
+		"endpoint": adminEndpointPollerStatus,
+		"outcome":  adminOutcomeUnauthorized,
+	}, 1)
+	assertMetricAtLeast(t, metricsText, "tap_admin_requests_total", map[string]string{
+		"endpoint": adminEndpointPollerStatus,
+		"outcome":  adminOutcomeSuccess,
+	}, 1)
+	assertMetricAtLeast(t, metricsText, "tap_admin_request_duration_seconds_count", map[string]string{
+		"endpoint": adminEndpointPollerStatus,
+		"outcome":  adminOutcomeSuccess,
+	}, 1)
 
 	cancel()
 	select {
@@ -841,6 +900,88 @@ func logFieldInt(entry map[string]any, key string) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func fetchMetricsBody(t *testing.T, url string) string {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("fetch metrics: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected metrics status 200, got %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read metrics body: %v", err)
+	}
+	return string(body)
+}
+
+func assertMetricAtLeast(t *testing.T, metricsText, metricName string, wantLabels map[string]string, min float64) {
+	t.Helper()
+	value, ok := metricValue(metricsText, metricName, wantLabels)
+	if !ok {
+		t.Fatalf("metric %s with labels %v not found", metricName, wantLabels)
+	}
+	if value < min {
+		t.Fatalf("metric %s with labels %v expected >= %v, got %v", metricName, wantLabels, min, value)
+	}
+}
+
+func metricValue(metricsText, metricName string, wantLabels map[string]string) (float64, bool) {
+	scanner := bufio.NewScanner(strings.NewReader(metricsText))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		nameAndLabels, rawValue, ok := strings.Cut(line, " ")
+		if !ok {
+			continue
+		}
+		name := nameAndLabels
+		labels := map[string]string{}
+		if open := strings.Index(nameAndLabels, "{"); open >= 0 {
+			closeIdx := strings.LastIndex(nameAndLabels, "}")
+			if closeIdx <= open {
+				continue
+			}
+			name = nameAndLabels[:open]
+			labelString := nameAndLabels[open+1 : closeIdx]
+			for _, pair := range strings.Split(labelString, ",") {
+				pair = strings.TrimSpace(pair)
+				if pair == "" {
+					continue
+				}
+				k, v, ok := strings.Cut(pair, "=")
+				if !ok {
+					continue
+				}
+				labels[strings.TrimSpace(k)] = strings.Trim(strings.TrimSpace(v), "\"")
+			}
+		}
+		if name != metricName {
+			continue
+		}
+		match := true
+		for k, v := range wantLabels {
+			if labels[k] != v {
+				match = false
+				break
+			}
+		}
+		if !match {
+			continue
+		}
+		value, err := strconv.ParseFloat(strings.TrimSpace(rawValue), 64)
+		if err != nil {
+			continue
+		}
+		return value, true
+	}
+	return 0, false
 }
 
 func waitForStatusOrError(url string, want int, timeout time.Duration, errCh <-chan error) error {

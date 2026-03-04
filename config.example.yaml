@@ -119,6 +119,8 @@ server:
   write_timeout: 5s
   max_body_size: 1048576
   admin_token: ${TAP_ADMIN_TOKEN}
+  admin_token_secondary: ${TAP_ADMIN_TOKEN_SECONDARY}
+  admin_replay_max_limit: 2000
 
 state:
   backend: sqlite

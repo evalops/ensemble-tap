@@ -37,6 +37,13 @@ type readiness interface {
 const (
 	defaultReplayDLQLimit = 100
 	maxReplayDLQLimit     = 2000
+
+	adminEndpointReplayDLQ    = "replay_dlq"
+	adminEndpointPollerStatus = "poller_status"
+	adminOutcomeSuccess       = "success"
+	adminOutcomeUnauthorized  = "unauthorized"
+	adminOutcomeBadRequest    = "bad_request"
+	adminOutcomeInternalError = "error"
 )
 
 func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
@@ -92,41 +99,56 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	mux.Handle("GET /metrics", promhttp.Handler())
 	if strings.TrimSpace(cfg.Server.AdminToken) != "" {
 		adminToken := strings.TrimSpace(cfg.Server.AdminToken)
-		requireAdminToken := func(w http.ResponseWriter, r *http.Request) (string, bool) {
+		adminTokenSecondary := strings.TrimSpace(cfg.Server.AdminTokenSecondary)
+		adminReplayMaxLimit := cfg.Server.AdminReplayMaxLimit
+		if adminReplayMaxLimit <= 0 {
+			adminReplayMaxLimit = maxReplayDLQLimit
+		}
+		observeAdmin := func(endpoint, outcome string, startedAt time.Time) {
+			metrics.AdminRequestsTotal.WithLabelValues(endpoint, outcome).Inc()
+			metrics.AdminRequestDurationSeconds.WithLabelValues(endpoint, outcome).Observe(time.Since(startedAt).Seconds())
+		}
+		requireAdminToken := func(endpoint string, w http.ResponseWriter, r *http.Request) (string, string, bool) {
 			reqID := requestID(r)
 			userAgent := strings.TrimSpace(r.UserAgent())
 			requestIP := requesterIP(r)
 			w.Header().Set("X-Request-ID", reqID)
 			startedAt := time.Now()
-			if !secureTokenEqual(strings.TrimSpace(r.Header.Get("X-Admin-Token")), adminToken) {
+			authorized, tokenSlot := authorizeAdminToken(strings.TrimSpace(r.Header.Get("X-Admin-Token")), adminToken, adminTokenSecondary)
+			if !authorized {
+				observeAdmin(endpoint, adminOutcomeUnauthorized, startedAt)
 				logger.Warn("admin request unauthorized",
 					"path", r.URL.Path,
 					"method", r.Method,
+					"endpoint", endpoint,
 					"request_id", reqID,
 					"requester_ip", requestIP,
 					"user_agent", userAgent,
 					"duration_ms", time.Since(startedAt).Milliseconds(),
 				)
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return reqID, false
+				return reqID, "", false
 			}
-			return reqID, true
+			return reqID, tokenSlot, true
 		}
 
 		mux.HandleFunc("POST /admin/replay-dlq", func(w http.ResponseWriter, r *http.Request) {
-			reqID, ok := requireAdminToken(w, r)
+			reqID, tokenSlot, ok := requireAdminToken(adminEndpointReplayDLQ, w, r)
 			if !ok {
 				return
 			}
 			startedAt := time.Now()
 			userAgent := strings.TrimSpace(r.UserAgent())
 			requestIP := requesterIP(r)
-			requestedLimit, limit, capped, err := parseReplayDLQLimit(r.URL.Query().Get("limit"))
+			requestedLimit, limit, capped, err := parseReplayDLQLimit(r.URL.Query().Get("limit"), adminReplayMaxLimit)
 			if err != nil {
+				observeAdmin(adminEndpointReplayDLQ, adminOutcomeBadRequest, startedAt)
 				logger.Warn("admin replay dlq rejected",
 					"path", r.URL.Path,
 					"method", r.Method,
+					"endpoint", adminEndpointReplayDLQ,
 					"request_id", reqID,
+					"token_slot", tokenSlot,
 					"requester_ip", requestIP,
 					"user_agent", userAgent,
 					"requested_limit_raw", strings.TrimSpace(r.URL.Query().Get("limit")),
@@ -140,10 +162,13 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 				return publisher.PublishRaw(ctx, subject, payload, dedupID)
 			})
 			if err != nil {
+				observeAdmin(adminEndpointReplayDLQ, adminOutcomeInternalError, startedAt)
 				logger.Error("admin replay dlq failed",
 					"path", r.URL.Path,
 					"method", r.Method,
+					"endpoint", adminEndpointReplayDLQ,
 					"request_id", reqID,
+					"token_slot", tokenSlot,
 					"requester_ip", requestIP,
 					"user_agent", userAgent,
 					"requested_limit", requestedLimit,
@@ -160,17 +185,20 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 				"request_id":      reqID,
 				"replayed":        replayed,
 				"effective_limit": limit,
-				"max_limit":       maxReplayDLQLimit,
+				"max_limit":       adminReplayMaxLimit,
 				"capped":          capped,
 			}
 			if requestedLimit > 0 {
 				response["requested_limit"] = requestedLimit
 			}
 			_ = json.NewEncoder(w).Encode(response)
+			observeAdmin(adminEndpointReplayDLQ, adminOutcomeSuccess, startedAt)
 			logger.Info("admin replay dlq completed",
 				"path", r.URL.Path,
 				"method", r.Method,
+				"endpoint", adminEndpointReplayDLQ,
 				"request_id", reqID,
+				"token_slot", tokenSlot,
 				"requester_ip", requestIP,
 				"user_agent", userAgent,
 				"requested_limit", requestedLimit,
@@ -181,7 +209,7 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			)
 		})
 		mux.HandleFunc("GET /admin/poller-status", func(w http.ResponseWriter, r *http.Request) {
-			reqID, ok := requireAdminToken(w, r)
+			reqID, tokenSlot, ok := requireAdminToken(adminEndpointPollerStatus, w, r)
 			if !ok {
 				return
 			}
@@ -200,10 +228,13 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 				"count":        len(statuses),
 				"pollers":      statuses,
 			})
+			observeAdmin(adminEndpointPollerStatus, adminOutcomeSuccess, startedAt)
 			logger.Info("admin poller status fetched",
 				"path", r.URL.Path,
 				"method", r.Method,
+				"endpoint", adminEndpointPollerStatus,
 				"request_id", reqID,
+				"token_slot", tokenSlot,
 				"requester_ip", requestIP,
 				"user_agent", userAgent,
 				"provider_filter", providerFilter,
@@ -255,7 +286,10 @@ func secureTokenEqual(actual, expected string) bool {
 	return subtle.ConstantTimeCompare(actualHash[:], expectedHash[:]) == 1
 }
 
-func parseReplayDLQLimit(raw string) (requested int, effective int, capped bool, err error) {
+func parseReplayDLQLimit(raw string, maxLimit int) (requested int, effective int, capped bool, err error) {
+	if maxLimit <= 0 {
+		maxLimit = maxReplayDLQLimit
+	}
 	raw = strings.TrimSpace(raw)
 	effective = defaultReplayDLQLimit
 	if raw == "" {
@@ -269,11 +303,26 @@ func parseReplayDLQLimit(raw string) (requested int, effective int, capped bool,
 		return 0, 0, false, fmt.Errorf("invalid limit %q: must be greater than 0", raw)
 	}
 	effective = requested
-	if effective > maxReplayDLQLimit {
-		effective = maxReplayDLQLimit
+	if effective > maxLimit {
+		effective = maxLimit
 		capped = true
 	}
 	return requested, effective, capped, nil
+}
+
+func authorizeAdminToken(actual, primary, secondary string) (authorized bool, tokenSlot string) {
+	primaryMatch := secureTokenEqual(actual, primary)
+	secondaryMatch := false
+	if strings.TrimSpace(secondary) != "" {
+		secondaryMatch = secureTokenEqual(actual, secondary)
+	}
+	if primaryMatch {
+		return true, "primary"
+	}
+	if secondaryMatch {
+		return true, "secondary"
+	}
+	return false, ""
 }
 
 func requesterIP(r *http.Request) string {

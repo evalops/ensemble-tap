@@ -14,6 +14,8 @@ type Metrics struct {
 	EventsPublishedTotal             *prometheus.CounterVec
 	EventPublishFailuresTotal        *prometheus.CounterVec
 	EventsDedupHitsTotal             *prometheus.CounterVec
+	AdminRequestsTotal               *prometheus.CounterVec
+	AdminRequestDurationSeconds      *prometheus.HistogramVec
 	ProviderHealth                   *prometheus.GaugeVec
 	NATSConnected                    prometheus.Gauge
 }
@@ -51,6 +53,15 @@ func NewMetrics() *Metrics {
 				Name: "tap_events_dedup_hits_total",
 				Help: "Events deduplicated by NATS in the dedup window.",
 			}, []string{"provider"}),
+			AdminRequestsTotal: promauto.NewCounterVec(prometheus.CounterOpts{
+				Name: "tap_admin_requests_total",
+				Help: "Admin endpoint requests by endpoint and outcome.",
+			}, []string{"endpoint", "outcome"}),
+			AdminRequestDurationSeconds: promauto.NewHistogramVec(prometheus.HistogramOpts{
+				Name:    "tap_admin_request_duration_seconds",
+				Help:    "Admin endpoint request latency by endpoint and outcome.",
+				Buckets: prometheus.DefBuckets,
+			}, []string{"endpoint", "outcome"}),
 			ProviderHealth: promauto.NewGaugeVec(prometheus.GaugeOpts{
 				Name: "tap_provider_health",
 				Help: "Provider health state (1 healthy, 0 unhealthy).",

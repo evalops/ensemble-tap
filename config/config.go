@@ -88,12 +88,14 @@ type ClickHouseConfig struct {
 }
 
 type ServerConfig struct {
-	Port         int           `koanf:"port"`
-	BasePath     string        `koanf:"base_path"`
-	ReadTimeout  time.Duration `koanf:"read_timeout"`
-	WriteTimeout time.Duration `koanf:"write_timeout"`
-	MaxBodySize  int64         `koanf:"max_body_size"`
-	AdminToken   string        `koanf:"admin_token"`
+	Port                int           `koanf:"port"`
+	BasePath            string        `koanf:"base_path"`
+	ReadTimeout         time.Duration `koanf:"read_timeout"`
+	WriteTimeout        time.Duration `koanf:"write_timeout"`
+	MaxBodySize         int64         `koanf:"max_body_size"`
+	AdminToken          string        `koanf:"admin_token"`
+	AdminTokenSecondary string        `koanf:"admin_token_secondary"`
+	AdminReplayMaxLimit int           `koanf:"admin_replay_max_limit"`
 }
 
 type StateConfig struct {
@@ -146,6 +148,9 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Server.MaxBodySize == 0 {
 		c.Server.MaxBodySize = 1 << 20
+	}
+	if c.Server.AdminReplayMaxLimit <= 0 {
+		c.Server.AdminReplayMaxLimit = 2000
 	}
 	if c.State.Backend == "" {
 		c.State.Backend = "memory"
