@@ -10,6 +10,7 @@ import (
 	"github.com/evalops/ensemble-tap/config"
 	"github.com/evalops/ensemble-tap/internal/normalize"
 	natsserver "github.com/nats-io/nats-server/v2/server"
+	"github.com/nats-io/nats.go"
 )
 
 func TestNATSPublisherPublishesAndDeduplicates(t *testing.T) {
@@ -256,4 +257,45 @@ func runNATSServer(t *testing.T) *natsserver.Server {
 		s.WaitForShutdown()
 	})
 	return s
+}
+
+func TestNormalizeNATSRuntimeConfigDefaults(t *testing.T) {
+	cfg := normalizeNATSRuntimeConfig(config.NATSConfig{})
+
+	if cfg.ConnectTimeout != 5*time.Second {
+		t.Fatalf("expected default connect timeout, got %s", cfg.ConnectTimeout)
+	}
+	if cfg.ReconnectWait != 2*time.Second {
+		t.Fatalf("expected default reconnect wait, got %s", cfg.ReconnectWait)
+	}
+	if cfg.MaxReconnects != -1 {
+		t.Fatalf("expected default max reconnects -1, got %d", cfg.MaxReconnects)
+	}
+	if cfg.PublishTimeout != 5*time.Second {
+		t.Fatalf("expected default publish timeout, got %s", cfg.PublishTimeout)
+	}
+	if cfg.StreamReplicas != 1 {
+		t.Fatalf("expected default stream replicas 1, got %d", cfg.StreamReplicas)
+	}
+	if cfg.StreamStorage != "file" {
+		t.Fatalf("expected default stream storage file, got %q", cfg.StreamStorage)
+	}
+	if cfg.StreamDiscard != "old" {
+		t.Fatalf("expected default stream discard old, got %q", cfg.StreamDiscard)
+	}
+}
+
+func TestStreamStorageAndDiscardPolicyMapping(t *testing.T) {
+	if got := streamStorageType("memory"); got != nats.MemoryStorage {
+		t.Fatalf("expected memory storage mapping, got %v", got)
+	}
+	if got := streamStorageType("file"); got != nats.FileStorage {
+		t.Fatalf("expected file storage mapping, got %v", got)
+	}
+	if got := streamDiscardPolicy("new"); got != nats.DiscardNew {
+		t.Fatalf("expected discard new mapping, got %v", got)
+	}
+	if got := streamDiscardPolicy("old"); got != nats.DiscardOld {
+		t.Fatalf("expected discard old mapping, got %v", got)
+	}
 }

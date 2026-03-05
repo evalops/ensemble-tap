@@ -159,3 +159,54 @@ func TestClickHouseSinkRetriesAfterInsertFailure(t *testing.T) {
 		t.Fatalf("expected at least 2 insert attempts, got %d", got)
 	}
 }
+
+func TestNormalizeClickHouseRuntimeConfigDefaults(t *testing.T) {
+	cfg := normalizeClickHouseRuntimeConfig(config.ClickHouseConfig{})
+
+	if cfg.Username != "default" {
+		t.Fatalf("expected default username, got %q", cfg.Username)
+	}
+	if cfg.DialTimeout != 5*time.Second {
+		t.Fatalf("expected default dial timeout, got %s", cfg.DialTimeout)
+	}
+	if cfg.MaxOpenConns != 4 {
+		t.Fatalf("expected default max open conns, got %d", cfg.MaxOpenConns)
+	}
+	if cfg.MaxIdleConns != 2 {
+		t.Fatalf("expected default max idle conns, got %d", cfg.MaxIdleConns)
+	}
+	if cfg.ConnMaxLifetime != 30*time.Minute {
+		t.Fatalf("expected default conn max lifetime, got %s", cfg.ConnMaxLifetime)
+	}
+	if cfg.BatchSize != 500 {
+		t.Fatalf("expected default batch size, got %d", cfg.BatchSize)
+	}
+	if cfg.FlushInterval != 2*time.Second {
+		t.Fatalf("expected default flush interval, got %s", cfg.FlushInterval)
+	}
+	if cfg.ConsumerFetchBatch != 100 {
+		t.Fatalf("expected default consumer fetch batch, got %d", cfg.ConsumerFetchBatch)
+	}
+	if cfg.ConsumerFetchMaxWait != 500*time.Millisecond {
+		t.Fatalf("expected default consumer fetch max wait, got %s", cfg.ConsumerFetchMaxWait)
+	}
+	if cfg.ConsumerAckWait != 30*time.Second {
+		t.Fatalf("expected default consumer ack wait, got %s", cfg.ConsumerAckWait)
+	}
+	if cfg.ConsumerMaxAckPending != 1000 {
+		t.Fatalf("expected default consumer max ack pending, got %d", cfg.ConsumerMaxAckPending)
+	}
+	if cfg.InsertTimeout != 10*time.Second {
+		t.Fatalf("expected default insert timeout, got %s", cfg.InsertTimeout)
+	}
+}
+
+func TestClickHouseAddresses(t *testing.T) {
+	addrs := clickHouseAddresses(" clickhouse-a:9000, clickhouse-b:9000 ")
+	if len(addrs) != 2 {
+		t.Fatalf("expected 2 clickhouse addresses, got %d", len(addrs))
+	}
+	if addrs[0] != "clickhouse-a:9000" || addrs[1] != "clickhouse-b:9000" {
+		t.Fatalf("unexpected clickhouse addresses: %#v", addrs)
+	}
+}

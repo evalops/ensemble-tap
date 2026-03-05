@@ -72,6 +72,38 @@ Notes:
 - `config.server.admin_rate_limit_per_sec` and `config.server.admin_rate_limit_burst` must both be greater than `0`.
 - `config.server.admin_allowed_cidrs` and `config.server.admin_mtls_required` provide network and client-cert guardrails for admin routes.
 
+## Tune NATS and ClickHouse
+
+```bash
+helm upgrade --install ensemble-tap ./charts/ensemble-tap \
+  --namespace ensemble \
+  --set env[0].name=NATS_URL \
+  --set env[0].value='nats://nats-a:4222,nats-b:4222' \
+  --set env[1].name=CLICKHOUSE_PASSWORD \
+  --set env[1].value='super-secret' \
+  --set config.nats.url='${NATS_URL}' \
+  --set config.nats.connect_timeout=5s \
+  --set config.nats.reconnect_wait=2s \
+  --set config.nats.max_reconnects=-1 \
+  --set config.nats.publish_timeout=5s \
+  --set config.nats.stream_replicas=3 \
+  --set config.nats.stream_storage=file \
+  --set config.nats.stream_discard=old \
+  --set config.clickhouse.addr='clickhouse-a:9000,clickhouse-b:9000' \
+  --set config.clickhouse.username=default \
+  --set config.clickhouse.password='${CLICKHOUSE_PASSWORD}' \
+  --set config.clickhouse.secure=true \
+  --set config.clickhouse.dial_timeout=5s \
+  --set config.clickhouse.max_open_conns=8 \
+  --set config.clickhouse.max_idle_conns=4 \
+  --set config.clickhouse.conn_max_lifetime=30m \
+  --set config.clickhouse.consumer_fetch_batch_size=200 \
+  --set config.clickhouse.consumer_fetch_max_wait=750ms \
+  --set config.clickhouse.consumer_ack_wait=45s \
+  --set config.clickhouse.consumer_max_ack_pending=2000 \
+  --set config.clickhouse.insert_timeout=15s
+```
+
 ## Ops hardening defaults
 
 - `podDisruptionBudget.enabled=true` with `minAvailable=1`.

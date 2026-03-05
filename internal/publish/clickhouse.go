@@ -2,6 +2,7 @@ package publish
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -45,16 +46,45 @@ type ClickHouseSink struct {
 	wg           sync.WaitGroup
 }
 
+const (
+	defaultClickHouseUser       = "default"
+	defaultClickHouseDialTO     = 5 * time.Second
+	defaultClickHouseMaxOpen    = 4
+	defaultClickHouseMaxIdle    = 2
+	defaultClickHouseConnMaxAge = 30 * time.Minute
+	defaultClickHouseBatchSize  = 500
+	defaultClickHouseFlushEvery = 2 * time.Second
+	defaultClickHouseFetchBatch = 100
+	defaultClickHouseFetchWait  = 500 * time.Millisecond
+	defaultClickHouseAckWait    = 30 * time.Second
+	defaultClickHouseAckPending = 1000
+	defaultClickHouseInsertTO   = 10 * time.Second
+)
+
 func NewClickHouseSink(ctx context.Context, cfg config.ClickHouseConfig, natsCfg config.NATSConfig, js nats.JetStreamContext, metrics *health.Metrics) (*ClickHouseSink, error) {
 	if strings.TrimSpace(cfg.Addr) == "" {
 		return nil, nil
 	}
+	cfg = normalizeClickHouseRuntimeConfig(cfg)
 
 	// Connect to default first so schema bootstrap can create cfg.Database when missing.
-	conn, err := clickhouse.Open(&clickhouse.Options{
-		Addr: []string{cfg.Addr},
-		Auth: clickhouse.Auth{Database: "default"},
-	})
+	opts := &clickhouse.Options{
+		Addr:            clickHouseAddresses(cfg.Addr),
+		Auth:            clickhouse.Auth{Database: "default", Username: cfg.Username, Password: cfg.Password},
+		DialTimeout:     cfg.DialTimeout,
+		MaxOpenConns:    cfg.MaxOpenConns,
+		MaxIdleConns:    cfg.MaxIdleConns,
+		ConnMaxLifetime: cfg.ConnMaxLifetime,
+	}
+	if cfg.Secure || cfg.InsecureSkipVerify {
+		tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
+		if cfg.InsecureSkipVerify {
+			// #nosec G402 -- operator-controlled setting for private/internal ClickHouse deployments.
+			tlsCfg.InsecureSkipVerify = true
+		}
+		opts.TLS = tlsCfg
+	}
+	conn, err := clickhouse.Open(opts)
 	if err != nil {
 		return nil, fmt.Errorf("open clickhouse: %w", err)
 	}
@@ -109,6 +139,7 @@ func (s *ClickHouseSink) Start(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	s.cfg = normalizeClickHouseRuntimeConfig(s.cfg)
 
 	subject := strings.TrimSuffix(s.natsCfg.SubjectPrefix, ".") + ".>"
 	sub, err := s.js.PullSubscribe(
@@ -116,8 +147,8 @@ func (s *ClickHouseSink) Start(ctx context.Context) error {
 		"tap_clickhouse_sink",
 		nats.BindStream(s.natsCfg.Stream),
 		nats.ManualAck(),
-		nats.AckWait(30*time.Second),
-		nats.MaxAckPending(1000),
+		nats.AckWait(s.cfg.ConsumerAckWait),
+		nats.MaxAckPending(s.cfg.ConsumerMaxAckPending),
 	)
 	if err != nil {
 		return fmt.Errorf("create pull subscription for clickhouse sink: %w", err)
@@ -144,7 +175,7 @@ func (s *ClickHouseSink) consumeLoop(ctx context.Context, sub *nats.Subscription
 		if len(rows) == 0 {
 			return
 		}
-		batchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		batchCtx, cancel := context.WithTimeout(ctx, s.cfg.InsertTimeout)
 		err := s.insertRows(batchCtx, rows)
 		cancel()
 		if err != nil {
@@ -173,7 +204,11 @@ func (s *ClickHouseSink) consumeLoop(ctx context.Context, sub *nats.Subscription
 		case <-ticker.C:
 			flush()
 		default:
-			fetched, err := sub.Fetch(min(100, s.cfg.BatchSize), nats.MaxWait(500*time.Millisecond))
+			fetchBatch := min(s.cfg.ConsumerFetchBatch, s.cfg.BatchSize)
+			if fetchBatch <= 0 {
+				fetchBatch = 1
+			}
+			fetched, err := sub.Fetch(fetchBatch, nats.MaxWait(s.cfg.ConsumerFetchMaxWait))
 			if err != nil {
 				if err == nats.ErrTimeout {
 					fetchErrStreak = 0
@@ -304,4 +339,66 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func normalizeClickHouseRuntimeConfig(cfg config.ClickHouseConfig) config.ClickHouseConfig {
+	if strings.TrimSpace(cfg.Username) == "" {
+		cfg.Username = defaultClickHouseUser
+	}
+	if cfg.DialTimeout <= 0 {
+		cfg.DialTimeout = defaultClickHouseDialTO
+	}
+	if cfg.MaxOpenConns <= 0 {
+		cfg.MaxOpenConns = defaultClickHouseMaxOpen
+	}
+	if cfg.MaxIdleConns <= 0 {
+		cfg.MaxIdleConns = defaultClickHouseMaxIdle
+	}
+	if cfg.MaxIdleConns > cfg.MaxOpenConns {
+		cfg.MaxIdleConns = cfg.MaxOpenConns
+	}
+	if cfg.ConnMaxLifetime < 0 {
+		cfg.ConnMaxLifetime = defaultClickHouseConnMaxAge
+	}
+	if cfg.ConnMaxLifetime == 0 {
+		cfg.ConnMaxLifetime = defaultClickHouseConnMaxAge
+	}
+	if cfg.BatchSize <= 0 {
+		cfg.BatchSize = defaultClickHouseBatchSize
+	}
+	if cfg.FlushInterval <= 0 {
+		cfg.FlushInterval = defaultClickHouseFlushEvery
+	}
+	if cfg.ConsumerFetchBatch <= 0 {
+		cfg.ConsumerFetchBatch = defaultClickHouseFetchBatch
+	}
+	if cfg.ConsumerFetchMaxWait <= 0 {
+		cfg.ConsumerFetchMaxWait = defaultClickHouseFetchWait
+	}
+	if cfg.ConsumerAckWait <= 0 {
+		cfg.ConsumerAckWait = defaultClickHouseAckWait
+	}
+	if cfg.ConsumerMaxAckPending <= 0 {
+		cfg.ConsumerMaxAckPending = defaultClickHouseAckPending
+	}
+	if cfg.InsertTimeout <= 0 {
+		cfg.InsertTimeout = defaultClickHouseInsertTO
+	}
+	return cfg
+}
+
+func clickHouseAddresses(raw string) []string {
+	parts := strings.Split(strings.TrimSpace(raw), ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		addr := strings.TrimSpace(part)
+		if addr == "" {
+			continue
+		}
+		out = append(out, addr)
+	}
+	if len(out) == 0 && strings.TrimSpace(raw) != "" {
+		return []string{strings.TrimSpace(raw)}
+	}
+	return out
 }

@@ -17,6 +17,23 @@ import (
 const (
 	defaultConfigPath            = "config.yaml"
 	envPrefix                    = "TAP_"
+	defaultNATSConnectTimeout    = 5 * time.Second
+	defaultNATSReconnectWait     = 2 * time.Second
+	defaultNATSMaxReconnects     = -1
+	defaultNATSPublishTimeout    = 5 * time.Second
+	defaultNATSStreamReplicas    = 1
+	defaultNATSStreamStorage     = "file"
+	defaultNATSStreamDiscard     = "old"
+	defaultClickHouseUser        = "default"
+	defaultClickHouseDialTimeout = 5 * time.Second
+	defaultClickHouseMaxOpen     = 4
+	defaultClickHouseMaxIdle     = 2
+	defaultClickHouseConnMaxLife = 30 * time.Minute
+	defaultClickHouseFetchBatch  = 100
+	defaultClickHouseFetchWait   = 500 * time.Millisecond
+	defaultClickHouseAckWait     = 30 * time.Second
+	defaultClickHouseAckPending  = 1000
+	defaultClickHouseInsertTO    = 10 * time.Second
 	defaultAdminReplayMaxLimit   = 2000
 	maxAdminReplayMaxLimit       = 100000
 	defaultAdminReplayJobTTL     = 24 * time.Hour
@@ -99,14 +116,34 @@ type NATSConfig struct {
 	TenantScopedSubjects bool          `koanf:"tenant_scoped_subjects"`
 	MaxAge               time.Duration `koanf:"max_age"`
 	DedupWindow          time.Duration `koanf:"dedup_window"`
+	ConnectTimeout       time.Duration `koanf:"connect_timeout"`
+	ReconnectWait        time.Duration `koanf:"reconnect_wait"`
+	MaxReconnects        int           `koanf:"max_reconnects"`
+	PublishTimeout       time.Duration `koanf:"publish_timeout"`
+	StreamReplicas       int           `koanf:"stream_replicas"`
+	StreamStorage        string        `koanf:"stream_storage"`
+	StreamDiscard        string        `koanf:"stream_discard"`
 }
 
 type ClickHouseConfig struct {
-	Addr          string        `koanf:"addr"`
-	Database      string        `koanf:"database"`
-	Table         string        `koanf:"table"`
-	BatchSize     int           `koanf:"batch_size"`
-	FlushInterval time.Duration `koanf:"flush_interval"`
+	Addr                  string        `koanf:"addr"`
+	Database              string        `koanf:"database"`
+	Table                 string        `koanf:"table"`
+	Username              string        `koanf:"username"`
+	Password              string        `koanf:"password"`
+	Secure                bool          `koanf:"secure"`
+	InsecureSkipVerify    bool          `koanf:"insecure_skip_verify"`
+	DialTimeout           time.Duration `koanf:"dial_timeout"`
+	MaxOpenConns          int           `koanf:"max_open_conns"`
+	MaxIdleConns          int           `koanf:"max_idle_conns"`
+	ConnMaxLifetime       time.Duration `koanf:"conn_max_lifetime"`
+	BatchSize             int           `koanf:"batch_size"`
+	FlushInterval         time.Duration `koanf:"flush_interval"`
+	ConsumerFetchBatch    int           `koanf:"consumer_fetch_batch_size"`
+	ConsumerFetchMaxWait  time.Duration `koanf:"consumer_fetch_max_wait"`
+	ConsumerAckWait       time.Duration `koanf:"consumer_ack_wait"`
+	ConsumerMaxAckPending int           `koanf:"consumer_max_ack_pending"`
+	InsertTimeout         time.Duration `koanf:"insert_timeout"`
 }
 
 type ServerConfig struct {
@@ -162,17 +199,68 @@ func (c *Config) ApplyDefaults() {
 	if c.NATS.DedupWindow == 0 {
 		c.NATS.DedupWindow = 2 * time.Minute
 	}
+	if c.NATS.ConnectTimeout == 0 {
+		c.NATS.ConnectTimeout = defaultNATSConnectTimeout
+	}
+	if c.NATS.ReconnectWait == 0 {
+		c.NATS.ReconnectWait = defaultNATSReconnectWait
+	}
+	if c.NATS.MaxReconnects == 0 {
+		c.NATS.MaxReconnects = defaultNATSMaxReconnects
+	}
+	if c.NATS.PublishTimeout == 0 {
+		c.NATS.PublishTimeout = defaultNATSPublishTimeout
+	}
+	if c.NATS.StreamReplicas == 0 {
+		c.NATS.StreamReplicas = defaultNATSStreamReplicas
+	}
+	if strings.TrimSpace(c.NATS.StreamStorage) == "" {
+		c.NATS.StreamStorage = defaultNATSStreamStorage
+	}
+	if strings.TrimSpace(c.NATS.StreamDiscard) == "" {
+		c.NATS.StreamDiscard = defaultNATSStreamDiscard
+	}
 	if c.ClickHouse.Database == "" {
 		c.ClickHouse.Database = "ensemble"
 	}
 	if c.ClickHouse.Table == "" {
 		c.ClickHouse.Table = "tap_events"
 	}
+	if strings.TrimSpace(c.ClickHouse.Username) == "" {
+		c.ClickHouse.Username = defaultClickHouseUser
+	}
+	if c.ClickHouse.DialTimeout == 0 {
+		c.ClickHouse.DialTimeout = defaultClickHouseDialTimeout
+	}
+	if c.ClickHouse.MaxOpenConns == 0 {
+		c.ClickHouse.MaxOpenConns = defaultClickHouseMaxOpen
+	}
+	if c.ClickHouse.MaxIdleConns == 0 {
+		c.ClickHouse.MaxIdleConns = defaultClickHouseMaxIdle
+	}
+	if c.ClickHouse.ConnMaxLifetime == 0 {
+		c.ClickHouse.ConnMaxLifetime = defaultClickHouseConnMaxLife
+	}
 	if c.ClickHouse.BatchSize == 0 {
 		c.ClickHouse.BatchSize = 500
 	}
 	if c.ClickHouse.FlushInterval == 0 {
 		c.ClickHouse.FlushInterval = 2 * time.Second
+	}
+	if c.ClickHouse.ConsumerFetchBatch == 0 {
+		c.ClickHouse.ConsumerFetchBatch = defaultClickHouseFetchBatch
+	}
+	if c.ClickHouse.ConsumerFetchMaxWait == 0 {
+		c.ClickHouse.ConsumerFetchMaxWait = defaultClickHouseFetchWait
+	}
+	if c.ClickHouse.ConsumerAckWait == 0 {
+		c.ClickHouse.ConsumerAckWait = defaultClickHouseAckWait
+	}
+	if c.ClickHouse.ConsumerMaxAckPending == 0 {
+		c.ClickHouse.ConsumerMaxAckPending = defaultClickHouseAckPending
+	}
+	if c.ClickHouse.InsertTimeout == 0 {
+		c.ClickHouse.InsertTimeout = defaultClickHouseInsertTO
 	}
 	if c.Server.Port == 0 {
 		c.Server.Port = 8080
@@ -237,6 +325,13 @@ func (c *Config) ApplyDefaults() {
 }
 
 func (c Config) Validate() error {
+	if err := validateNATSConfig(c.NATS); err != nil {
+		return err
+	}
+	if err := validateClickHouseConfig(c.ClickHouse); err != nil {
+		return err
+	}
+
 	primary := strings.TrimSpace(c.Server.AdminToken)
 	secondary := strings.TrimSpace(c.Server.AdminTokenSecondary)
 	if primary == "" && secondary != "" {
@@ -298,6 +393,128 @@ func (c Config) Validate() error {
 	}
 	if err := validateProviders(c.Providers); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateNATSConfig(cfg NATSConfig) error {
+	if strings.TrimSpace(cfg.URL) == "" {
+		return fmt.Errorf("nats.url must not be empty")
+	}
+	if strings.TrimSpace(cfg.Stream) == "" {
+		return fmt.Errorf("nats.stream must not be empty")
+	}
+	subjectPrefix := strings.TrimSpace(cfg.SubjectPrefix)
+	if subjectPrefix == "" {
+		return fmt.Errorf("nats.subject_prefix must not be empty")
+	}
+	if strings.ContainsAny(subjectPrefix, " \t\r\n") {
+		return fmt.Errorf("nats.subject_prefix must not contain whitespace")
+	}
+	if strings.Contains(subjectPrefix, "*") || strings.Contains(subjectPrefix, ">") {
+		return fmt.Errorf("nats.subject_prefix must not contain wildcard tokens")
+	}
+	if cfg.MaxAge <= 0 {
+		return fmt.Errorf("nats.max_age must be greater than 0")
+	}
+	if cfg.DedupWindow <= 0 {
+		return fmt.Errorf("nats.dedup_window must be greater than 0")
+	}
+	if cfg.DedupWindow > cfg.MaxAge {
+		return fmt.Errorf("nats.dedup_window must be less than or equal to nats.max_age")
+	}
+	if cfg.ConnectTimeout <= 0 {
+		return fmt.Errorf("nats.connect_timeout must be greater than 0")
+	}
+	if cfg.ReconnectWait <= 0 {
+		return fmt.Errorf("nats.reconnect_wait must be greater than 0")
+	}
+	if cfg.MaxReconnects < -1 {
+		return fmt.Errorf("nats.max_reconnects must be greater than or equal to -1")
+	}
+	if cfg.PublishTimeout <= 0 {
+		return fmt.Errorf("nats.publish_timeout must be greater than 0")
+	}
+	if cfg.StreamReplicas <= 0 {
+		return fmt.Errorf("nats.stream_replicas must be greater than 0")
+	}
+	streamStorage := strings.ToLower(strings.TrimSpace(cfg.StreamStorage))
+	switch streamStorage {
+	case "file", "memory":
+	default:
+		return fmt.Errorf("nats.stream_storage must be one of file|memory")
+	}
+	streamDiscard := strings.ToLower(strings.TrimSpace(cfg.StreamDiscard))
+	switch streamDiscard {
+	case "old", "new":
+	default:
+		return fmt.Errorf("nats.stream_discard must be one of old|new")
+	}
+	return nil
+}
+
+func validateClickHouseConfig(cfg ClickHouseConfig) error {
+	addr := strings.TrimSpace(cfg.Addr)
+	if addr == "" {
+		return nil
+	}
+	if strings.TrimSpace(cfg.Database) == "" {
+		return fmt.Errorf("clickhouse.database must not be empty when clickhouse.addr is configured")
+	}
+	if strings.TrimSpace(cfg.Table) == "" {
+		return fmt.Errorf("clickhouse.table must not be empty when clickhouse.addr is configured")
+	}
+	for _, raw := range strings.Split(addr, ",") {
+		entry := strings.TrimSpace(raw)
+		if entry == "" {
+			return fmt.Errorf("clickhouse.addr must not contain empty entries")
+		}
+		host, port, err := net.SplitHostPort(entry)
+		if err != nil || strings.TrimSpace(host) == "" || strings.TrimSpace(port) == "" {
+			return fmt.Errorf("clickhouse.addr entry %q must be host:port", entry)
+		}
+	}
+	if strings.TrimSpace(cfg.Username) == "" {
+		return fmt.Errorf("clickhouse.username must not be empty when clickhouse.addr is configured")
+	}
+	if cfg.InsecureSkipVerify && !cfg.Secure {
+		return fmt.Errorf("clickhouse.insecure_skip_verify requires clickhouse.secure=true")
+	}
+	if cfg.DialTimeout <= 0 {
+		return fmt.Errorf("clickhouse.dial_timeout must be greater than 0")
+	}
+	if cfg.MaxOpenConns <= 0 {
+		return fmt.Errorf("clickhouse.max_open_conns must be greater than 0")
+	}
+	if cfg.MaxIdleConns < 0 {
+		return fmt.Errorf("clickhouse.max_idle_conns must be greater than or equal to 0")
+	}
+	if cfg.MaxIdleConns > cfg.MaxOpenConns {
+		return fmt.Errorf("clickhouse.max_idle_conns must be less than or equal to clickhouse.max_open_conns")
+	}
+	if cfg.ConnMaxLifetime < 0 {
+		return fmt.Errorf("clickhouse.conn_max_lifetime must be greater than or equal to 0")
+	}
+	if cfg.BatchSize <= 0 {
+		return fmt.Errorf("clickhouse.batch_size must be greater than 0")
+	}
+	if cfg.FlushInterval <= 0 {
+		return fmt.Errorf("clickhouse.flush_interval must be greater than 0")
+	}
+	if cfg.ConsumerFetchBatch <= 0 {
+		return fmt.Errorf("clickhouse.consumer_fetch_batch_size must be greater than 0")
+	}
+	if cfg.ConsumerFetchMaxWait <= 0 {
+		return fmt.Errorf("clickhouse.consumer_fetch_max_wait must be greater than 0")
+	}
+	if cfg.ConsumerAckWait <= 0 {
+		return fmt.Errorf("clickhouse.consumer_ack_wait must be greater than 0")
+	}
+	if cfg.ConsumerMaxAckPending <= 0 {
+		return fmt.Errorf("clickhouse.consumer_max_ack_pending must be greater than 0")
+	}
+	if cfg.InsertTimeout <= 0 {
+		return fmt.Errorf("clickhouse.insert_timeout must be greater than 0")
 	}
 	return nil
 }

@@ -5,6 +5,173 @@
     "config": {
       "type": "object",
       "properties": {
+        "nats": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "minLength": 1,
+              "description": "NATS server URL."
+            },
+            "stream": {
+              "type": "string",
+              "minLength": 1,
+              "description": "JetStream stream name used for normalized events."
+            },
+            "subject_prefix": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Subject prefix for published events."
+            },
+            "tenant_scoped_subjects": {
+              "type": "boolean",
+              "description": "Include tenant segment in NATS subjects."
+            },
+            "max_age": {
+              "type": "string",
+              "description": "JetStream message retention duration (for example 168h)."
+            },
+            "dedup_window": {
+              "type": "string",
+              "description": "JetStream deduplication window (for example 2m)."
+            },
+            "connect_timeout": {
+              "type": "string",
+              "description": "NATS connection timeout."
+            },
+            "reconnect_wait": {
+              "type": "string",
+              "description": "Delay between NATS reconnect attempts."
+            },
+            "max_reconnects": {
+              "type": "integer",
+              "minimum": -1,
+              "description": "Maximum NATS reconnect attempts (-1 for unlimited)."
+            },
+            "publish_timeout": {
+              "type": "string",
+              "description": "Timeout for one NATS publish attempt."
+            },
+            "stream_replicas": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "JetStream stream replication factor."
+            },
+            "stream_storage": {
+              "type": "string",
+              "enum": ["file", "memory"],
+              "description": "JetStream storage type."
+            },
+            "stream_discard": {
+              "type": "string",
+              "enum": ["old", "new"],
+              "description": "JetStream discard policy when limits are reached."
+            }
+          }
+        },
+        "clickhouse": {
+          "type": "object",
+          "properties": {
+            "addr": {
+              "type": "string",
+              "description": "ClickHouse host:port (or comma-separated host:port list). Empty disables sink."
+            },
+            "database": {
+              "type": "string",
+              "minLength": 1,
+              "description": "ClickHouse target database."
+            },
+            "table": {
+              "type": "string",
+              "minLength": 1,
+              "description": "ClickHouse target table."
+            },
+            "username": {
+              "type": "string",
+              "minLength": 1,
+              "description": "ClickHouse username."
+            },
+            "password": {
+              "type": "string",
+              "description": "ClickHouse password."
+            },
+            "secure": {
+              "type": "boolean",
+              "description": "Use TLS for ClickHouse client connections."
+            },
+            "insecure_skip_verify": {
+              "type": "boolean",
+              "description": "Skip ClickHouse TLS certificate verification (use only for trusted internal endpoints)."
+            },
+            "dial_timeout": {
+              "type": "string",
+              "description": "ClickHouse dial timeout."
+            },
+            "max_open_conns": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Maximum ClickHouse open connections."
+            },
+            "max_idle_conns": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Maximum idle ClickHouse connections."
+            },
+            "conn_max_lifetime": {
+              "type": "string",
+              "description": "Maximum ClickHouse connection lifetime."
+            },
+            "batch_size": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Rows per ClickHouse insert batch."
+            },
+            "flush_interval": {
+              "type": "string",
+              "description": "Maximum interval before flushing pending ClickHouse rows."
+            },
+            "consumer_fetch_batch_size": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "NATS pull-consumer fetch batch size for ClickHouse sink."
+            },
+            "consumer_fetch_max_wait": {
+              "type": "string",
+              "description": "NATS pull-consumer max wait per fetch."
+            },
+            "consumer_ack_wait": {
+              "type": "string",
+              "description": "NATS ack wait duration for ClickHouse sink consumer."
+            },
+            "consumer_max_ack_pending": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Maximum pending acks for ClickHouse sink consumer."
+            },
+            "insert_timeout": {
+              "type": "string",
+              "description": "Timeout for a single ClickHouse insert flush."
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "insecure_skip_verify": {
+                    "const": true
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "secure": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          ]
+        },
         "server": {
           "type": "object",
           "properties": {

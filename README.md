@@ -64,6 +64,14 @@ make ci-local
 - `state.backend=memory` keeps checkpoints/snapshots in memory.
 - `state.backend=sqlite` persists poll state to `state.sqlite_path`.
 
+## NATS + ClickHouse Tuning
+
+- `nats.connect_timeout`, `nats.reconnect_wait`, `nats.max_reconnects`, and `nats.publish_timeout` tune connection and publish behavior.
+- `nats.stream_replicas`, `nats.stream_storage` (`file|memory`), and `nats.stream_discard` (`old|new`) tune JetStream durability and pressure behavior.
+- `clickhouse.username`/`clickhouse.password`, `clickhouse.secure`, and `clickhouse.insecure_skip_verify` tune ClickHouse auth/TLS.
+- `clickhouse.max_open_conns`, `clickhouse.max_idle_conns`, and `clickhouse.conn_max_lifetime` tune connection pool behavior.
+- `clickhouse.consumer_fetch_batch_size`, `clickhouse.consumer_fetch_max_wait`, `clickhouse.consumer_ack_wait`, `clickhouse.consumer_max_ack_pending`, and `clickhouse.insert_timeout` tune sink throughput and ack latency.
+
 ## Admin Endpoints
 
 When any admin token is configured (`server.admin_token`, `server.admin_token_secondary`, `server.admin_token_read`, `server.admin_token_replay`, `server.admin_token_cancel`), these endpoints are available:

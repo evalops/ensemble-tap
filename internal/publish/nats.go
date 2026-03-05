@@ -25,9 +25,26 @@ type NATSPublisher struct {
 }
 
 const natsRequestIDHeader = "X-Request-ID"
+const (
+	defaultNATSConnectTimeout = 5 * time.Second
+	defaultNATSReconnectWait  = 2 * time.Second
+	defaultNATSMaxReconnects  = -1
+	defaultNATSPublishTimeout = 5 * time.Second
+	defaultNATSReplicas       = 1
+	defaultNATSStreamStorage  = "file"
+	defaultNATSStreamDiscard  = "old"
+)
 
 func NewNATSPublisher(ctx context.Context, cfg config.NATSConfig, metrics *health.Metrics) (*NATSPublisher, error) {
-	nc, err := nats.Connect(cfg.URL, nats.Name("ensemble-tap"))
+	cfg = normalizeNATSRuntimeConfig(cfg)
+	nc, err := nats.Connect(
+		cfg.URL,
+		nats.Name("ensemble-tap"),
+		nats.Timeout(cfg.ConnectTimeout),
+		nats.RetryOnFailedConnect(true),
+		nats.MaxReconnects(cfg.MaxReconnects),
+		nats.ReconnectWait(cfg.ReconnectWait),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("connect nats: %w", err)
 	}
@@ -77,10 +94,11 @@ func (p *NATSPublisher) ensureStream(_ context.Context) error {
 		Name:       p.cfg.Stream,
 		Subjects:   []string{subjectPattern},
 		Retention:  nats.LimitsPolicy,
-		Discard:    nats.DiscardOld,
-		Storage:    nats.FileStorage,
+		Discard:    streamDiscardPolicy(p.cfg.StreamDiscard),
+		Storage:    streamStorageType(p.cfg.StreamStorage),
 		MaxAge:     p.cfg.MaxAge,
 		Duplicates: p.cfg.DedupWindow,
+		Replicas:   p.cfg.StreamReplicas,
 	}
 
 	if _, err := p.js.AddStream(streamCfg); err == nil {
@@ -129,7 +147,9 @@ func (p *NATSPublisher) Publish(ctx context.Context, event cloudevents.Event, de
 		msg.Header.Set(natsRequestIDHeader, requestID)
 	}
 
-	ack, err := p.js.PublishMsg(msg, nats.Context(ctx))
+	pubCtx, cancel := context.WithTimeout(ctx, p.cfg.PublishTimeout)
+	defer cancel()
+	ack, err := p.js.PublishMsg(msg, nats.Context(pubCtx))
 	if err != nil {
 		if p.metrics != nil {
 			p.metrics.EventPublishFailuresTotal.WithLabelValues(data.Provider).Inc()
@@ -161,7 +181,9 @@ func (p *NATSPublisher) PublishRaw(ctx context.Context, subject string, payload 
 	if requestID != "" {
 		msg.Header.Set(natsRequestIDHeader, requestID)
 	}
-	_, err := p.js.PublishMsg(msg, nats.Context(ctx))
+	pubCtx, cancel := context.WithTimeout(ctx, p.cfg.PublishTimeout)
+	defer cancel()
+	_, err := p.js.PublishMsg(msg, nats.Context(pubCtx))
 	return err
 }
 
@@ -242,4 +264,47 @@ func requestIDFromCloudEventPayload(payload []byte) string {
 		return ""
 	}
 	return requestIDFromCloudEvent(event)
+}
+
+func normalizeNATSRuntimeConfig(cfg config.NATSConfig) config.NATSConfig {
+	if cfg.ConnectTimeout <= 0 {
+		cfg.ConnectTimeout = defaultNATSConnectTimeout
+	}
+	if cfg.ReconnectWait <= 0 {
+		cfg.ReconnectWait = defaultNATSReconnectWait
+	}
+	if cfg.MaxReconnects == 0 {
+		cfg.MaxReconnects = defaultNATSMaxReconnects
+	}
+	if cfg.PublishTimeout <= 0 {
+		cfg.PublishTimeout = defaultNATSPublishTimeout
+	}
+	if cfg.StreamReplicas <= 0 {
+		cfg.StreamReplicas = defaultNATSReplicas
+	}
+	if strings.TrimSpace(cfg.StreamStorage) == "" {
+		cfg.StreamStorage = defaultNATSStreamStorage
+	}
+	if strings.TrimSpace(cfg.StreamDiscard) == "" {
+		cfg.StreamDiscard = defaultNATSStreamDiscard
+	}
+	return cfg
+}
+
+func streamStorageType(raw string) nats.StorageType {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "memory":
+		return nats.MemoryStorage
+	default:
+		return nats.FileStorage
+	}
+}
+
+func streamDiscardPolicy(raw string) nats.DiscardPolicy {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "new":
+		return nats.DiscardNew
+	default:
+		return nats.DiscardOld
+	}
 }
