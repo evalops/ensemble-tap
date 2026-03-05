@@ -154,6 +154,10 @@ type ClickHouseConfig struct {
 	Password              string        `koanf:"password"`
 	Secure                bool          `koanf:"secure"`
 	InsecureSkipVerify    bool          `koanf:"insecure_skip_verify"`
+	TLSServerName         string        `koanf:"tls_server_name"`
+	CAFile                string        `koanf:"ca_file"`
+	CertFile              string        `koanf:"cert_file"`
+	KeyFile               string        `koanf:"key_file"`
 	DialTimeout           time.Duration `koanf:"dial_timeout"`
 	MaxOpenConns          int           `koanf:"max_open_conns"`
 	MaxIdleConns          int           `koanf:"max_idle_conns"`
@@ -539,6 +543,10 @@ func validateClickHouseConfig(cfg ClickHouseConfig) error {
 	if addr == "" {
 		return nil
 	}
+	tlsServerName := strings.TrimSpace(cfg.TLSServerName)
+	caFile := strings.TrimSpace(cfg.CAFile)
+	certFile := strings.TrimSpace(cfg.CertFile)
+	keyFile := strings.TrimSpace(cfg.KeyFile)
 	if strings.TrimSpace(cfg.Database) == "" {
 		return fmt.Errorf("clickhouse.database must not be empty when clickhouse.addr is configured")
 	}
@@ -560,6 +568,15 @@ func validateClickHouseConfig(cfg ClickHouseConfig) error {
 	}
 	if cfg.InsecureSkipVerify && !cfg.Secure {
 		return fmt.Errorf("clickhouse.insecure_skip_verify requires clickhouse.secure=true")
+	}
+	if (tlsServerName != "" || caFile != "" || certFile != "" || keyFile != "") && !cfg.Secure {
+		return fmt.Errorf("clickhouse.tls_server_name, clickhouse.ca_file, clickhouse.cert_file, and clickhouse.key_file require clickhouse.secure=true")
+	}
+	if strings.ContainsAny(tlsServerName, " \t\r\n") {
+		return fmt.Errorf("clickhouse.tls_server_name must not contain whitespace")
+	}
+	if (certFile == "") != (keyFile == "") {
+		return fmt.Errorf("clickhouse.cert_file and clickhouse.key_file must be configured together")
 	}
 	if cfg.DialTimeout <= 0 {
 		return fmt.Errorf("clickhouse.dial_timeout must be greater than 0")

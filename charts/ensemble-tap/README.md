@@ -101,6 +101,10 @@ helm upgrade --install ensemble-tap ./charts/ensemble-tap \
   --set config.clickhouse.username=default \
   --set config.clickhouse.password='${CLICKHOUSE_PASSWORD}' \
   --set config.clickhouse.secure=true \
+  --set config.clickhouse.tls_server_name=clickhouse.internal \
+  --set config.clickhouse.ca_file=/var/run/ensemble-tap/certs/clickhouse-ca.crt \
+  --set config.clickhouse.cert_file=/var/run/ensemble-tap/certs/clickhouse-client.crt \
+  --set config.clickhouse.key_file=/var/run/ensemble-tap/certs/clickhouse-client.key \
   --set config.clickhouse.dial_timeout=5s \
   --set config.clickhouse.max_open_conns=8 \
   --set config.clickhouse.max_idle_conns=4 \
@@ -112,16 +116,17 @@ helm upgrade --install ensemble-tap ./charts/ensemble-tap \
   --set config.clickhouse.consumer_max_ack_pending=2000 \
   --set config.clickhouse.insert_timeout=15s \
   --set config.clickhouse.retention_ttl=2160h \
-  --set extraVolumes[0].name=nats-auth \
-  --set extraVolumes[0].secret.secretName=ensemble-tap-nats-auth \
-  --set extraVolumeMounts[0].name=nats-auth \
-  --set extraVolumeMounts[0].mountPath=/var/run/ensemble-tap/nats \
+  --set extraVolumes[0].name=tap-transport-secrets \
+  --set extraVolumes[0].secret.secretName=ensemble-tap-transport-secrets \
+  --set extraVolumeMounts[0].name=tap-transport-secrets \
+  --set extraVolumeMounts[0].mountPath=/var/run/ensemble-tap \
   --set extraVolumeMounts[0].readOnly=true
 ```
 
 Auth notes:
 - Use only one NATS auth mode at a time: `username/password`, `token`, or `creds_file`.
 - If NATS TLS files are used (`ca_file`, `cert_file`, `key_file`), set `config.nats.secure=true` and mount files via `extraVolumes` + `extraVolumeMounts`.
+- If ClickHouse TLS files are used (`ca_file`, `cert_file`, `key_file`), set `config.clickhouse.secure=true`; `cert_file` and `key_file` must be set together.
 - If `config.clickhouse.insecure_skip_verify=true`, `config.clickhouse.secure` must also be `true`.
 
 ## Ops hardening defaults

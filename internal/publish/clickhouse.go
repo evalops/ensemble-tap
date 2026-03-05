@@ -3,8 +3,10 @@ package publish
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -78,12 +80,11 @@ func NewClickHouseSink(ctx context.Context, cfg config.ClickHouseConfig, natsCfg
 		MaxIdleConns:    cfg.MaxIdleConns,
 		ConnMaxLifetime: cfg.ConnMaxLifetime,
 	}
-	if cfg.Secure || cfg.InsecureSkipVerify {
-		tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
-		if cfg.InsecureSkipVerify {
-			// #nosec G402 -- operator-controlled setting for private/internal ClickHouse deployments.
-			tlsCfg.InsecureSkipVerify = true
-		}
+	tlsCfg, err := clickHouseTLSConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("configure clickhouse tls: %w", err)
+	}
+	if tlsCfg != nil {
 		opts.TLS = tlsCfg
 	}
 	conn, err := clickhouse.Open(opts)
@@ -349,6 +350,10 @@ func min(a, b int) int {
 }
 
 func normalizeClickHouseRuntimeConfig(cfg config.ClickHouseConfig) config.ClickHouseConfig {
+	cfg.TLSServerName = strings.TrimSpace(cfg.TLSServerName)
+	cfg.CAFile = strings.TrimSpace(cfg.CAFile)
+	cfg.CertFile = strings.TrimSpace(cfg.CertFile)
+	cfg.KeyFile = strings.TrimSpace(cfg.KeyFile)
 	if strings.TrimSpace(cfg.Username) == "" {
 		cfg.Username = defaultClickHouseUser
 	}
@@ -415,4 +420,37 @@ func clickHouseAddresses(raw string) []string {
 		return []string{strings.TrimSpace(raw)}
 	}
 	return out
+}
+
+func clickHouseTLSConfig(cfg config.ClickHouseConfig) (*tls.Config, error) {
+	if !cfg.Secure && !cfg.InsecureSkipVerify && cfg.TLSServerName == "" && cfg.CAFile == "" && cfg.CertFile == "" && cfg.KeyFile == "" {
+		return nil, nil
+	}
+	tlsCfg := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		ServerName: cfg.TLSServerName,
+	}
+	if cfg.InsecureSkipVerify {
+		// #nosec G402 -- operator-controlled setting for private/internal ClickHouse deployments.
+		tlsCfg.InsecureSkipVerify = true
+	}
+	if cfg.CAFile != "" {
+		pem, err := os.ReadFile(cfg.CAFile)
+		if err != nil {
+			return nil, fmt.Errorf("read clickhouse ca_file: %w", err)
+		}
+		roots := x509.NewCertPool()
+		if !roots.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("parse clickhouse ca_file: no certificates found")
+		}
+		tlsCfg.RootCAs = roots
+	}
+	if cfg.CertFile != "" || cfg.KeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("load clickhouse client certificate/key pair: %w", err)
+		}
+		tlsCfg.Certificates = []tls.Certificate{cert}
+	}
+	return tlsCfg, nil
 }

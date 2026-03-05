@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -204,6 +205,62 @@ func TestNormalizeClickHouseRuntimeConfigDefaults(t *testing.T) {
 	}
 	if cfg.RetentionTTL != 365*24*time.Hour {
 		t.Fatalf("expected default retention ttl 365d, got %s", cfg.RetentionTTL)
+	}
+}
+
+func TestNormalizeClickHouseRuntimeConfigTrimsTLSFields(t *testing.T) {
+	cfg := normalizeClickHouseRuntimeConfig(config.ClickHouseConfig{
+		TLSServerName: " clickhouse.internal ",
+		CAFile:        " /tmp/ca.pem ",
+		CertFile:      " /tmp/client.crt ",
+		KeyFile:       " /tmp/client.key ",
+	})
+	if cfg.TLSServerName != "clickhouse.internal" {
+		t.Fatalf("expected trimmed tls server name, got %q", cfg.TLSServerName)
+	}
+	if cfg.CAFile != "/tmp/ca.pem" {
+		t.Fatalf("expected trimmed ca file, got %q", cfg.CAFile)
+	}
+	if cfg.CertFile != "/tmp/client.crt" {
+		t.Fatalf("expected trimmed cert file, got %q", cfg.CertFile)
+	}
+	if cfg.KeyFile != "/tmp/client.key" {
+		t.Fatalf("expected trimmed key file, got %q", cfg.KeyFile)
+	}
+}
+
+func TestClickHouseTLSConfigSelection(t *testing.T) {
+	tlsCfg, err := clickHouseTLSConfig(config.ClickHouseConfig{})
+	if err != nil {
+		t.Fatalf("expected no tls config error, got %v", err)
+	}
+	if tlsCfg != nil {
+		t.Fatalf("expected nil tls config for insecure defaults")
+	}
+
+	tlsCfg, err = clickHouseTLSConfig(config.ClickHouseConfig{Secure: true, TLSServerName: "clickhouse.internal"})
+	if err != nil {
+		t.Fatalf("expected secure tls config without error, got %v", err)
+	}
+	if tlsCfg == nil {
+		t.Fatalf("expected tls config when secure=true")
+	}
+	if tlsCfg.ServerName != "clickhouse.internal" {
+		t.Fatalf("expected tls server name clickhouse.internal, got %q", tlsCfg.ServerName)
+	}
+
+	_, err = clickHouseTLSConfig(config.ClickHouseConfig{Secure: true, CAFile: "/tmp/not-found-ca.pem"})
+	if err == nil {
+		t.Fatalf("expected missing ca_file to error")
+	}
+
+	badCA := t.TempDir() + "/bad-ca.pem"
+	if writeErr := os.WriteFile(badCA, []byte("not-a-cert"), 0o600); writeErr != nil {
+		t.Fatalf("write bad ca file: %v", writeErr)
+	}
+	_, err = clickHouseTLSConfig(config.ClickHouseConfig{Secure: true, CAFile: badCA})
+	if err == nil {
+		t.Fatalf("expected malformed ca_file to error")
 	}
 }
 

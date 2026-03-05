@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -119,6 +120,9 @@ func (p *NATSPublisher) ensureStream(_ context.Context) error {
 		streamCfg.MaxBytes = p.cfg.StreamMaxBytes
 	}
 	if p.cfg.StreamMaxMsgSize > 0 {
+		if p.cfg.StreamMaxMsgSize > math.MaxInt32 {
+			return fmt.Errorf("nats.stream_max_msg_size %d exceeds max supported %d", p.cfg.StreamMaxMsgSize, math.MaxInt32)
+		}
 		streamCfg.MaxMsgSize = int32(p.cfg.StreamMaxMsgSize)
 	}
 

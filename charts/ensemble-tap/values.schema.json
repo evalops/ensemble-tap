@@ -312,6 +312,22 @@
               "type": "boolean",
               "description": "Skip ClickHouse TLS certificate verification (use only for trusted internal endpoints)."
             },
+            "tls_server_name": {
+              "type": "string",
+              "description": "Optional TLS SNI/server name override for ClickHouse certificate validation."
+            },
+            "ca_file": {
+              "type": "string",
+              "description": "Optional path to a PEM CA bundle used to validate ClickHouse server certificates."
+            },
+            "cert_file": {
+              "type": "string",
+              "description": "Optional path to a PEM client certificate for mTLS to ClickHouse."
+            },
+            "key_file": {
+              "type": "string",
+              "description": "Optional path to a PEM private key for mTLS to ClickHouse."
+            },
             "dial_timeout": {
               "type": "string",
               "description": "ClickHouse dial timeout."
@@ -382,6 +398,88 @@
               },
               "then": {
                 "properties": {
+                  "secure": {
+                    "const": true
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "required": ["tls_server_name"],
+                "properties": {
+                  "tls_server_name": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "secure": {
+                    "const": true
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "required": ["ca_file"],
+                "properties": {
+                  "ca_file": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "secure": {
+                    "const": true
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "required": ["cert_file"],
+                "properties": {
+                  "cert_file": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "then": {
+                "required": ["key_file"],
+                "properties": {
+                  "key_file": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "secure": {
+                    "const": true
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "required": ["key_file"],
+                "properties": {
+                  "key_file": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "then": {
+                "required": ["cert_file"],
+                "properties": {
+                  "cert_file": {
+                    "type": "string",
+                    "minLength": 1
+                  },
                   "secure": {
                     "const": true
                   }

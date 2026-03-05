@@ -107,6 +107,9 @@ func TestLoadConfigMissingFileAppliesDefaults(t *testing.T) {
 	if cfg.ClickHouse.Username != "default" {
 		t.Fatalf("expected default clickhouse username default, got %q", cfg.ClickHouse.Username)
 	}
+	if cfg.ClickHouse.TLSServerName != "" || cfg.ClickHouse.CAFile != "" || cfg.ClickHouse.CertFile != "" || cfg.ClickHouse.KeyFile != "" {
+		t.Fatalf("expected default clickhouse TLS fields to be empty")
+	}
 	if cfg.ClickHouse.DialTimeout != 5*time.Second {
 		t.Fatalf("expected default clickhouse dial timeout 5s, got %s", cfg.ClickHouse.DialTimeout)
 	}
@@ -220,6 +223,8 @@ func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
 	t.Setenv("TAP_CLICKHOUSE_FLUSH_INTERVAL", "3s")
 	t.Setenv("TAP_CLICKHOUSE_MAX_OPEN_CONNS", "9")
 	t.Setenv("TAP_CLICKHOUSE_USERNAME", "ops")
+	t.Setenv("TAP_CLICKHOUSE_TLS_SERVER_NAME", "clickhouse.internal")
+	t.Setenv("TAP_CLICKHOUSE_CA_FILE", "/var/run/secrets/clickhouse/ca.crt")
 	t.Setenv("TAP_CLICKHOUSE_CONSUMER_NAME", "tap_clickhouse_sink_blue")
 	t.Setenv("TAP_CLICKHOUSE_RETENTION_TTL", "720h")
 	t.Setenv("TAP_PROVIDERS_STRIPE_SECRET", "whsec_env")
@@ -316,6 +321,12 @@ func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
 	}
 	if cfg.ClickHouse.Username != "ops" {
 		t.Fatalf("expected clickhouse.username override, got %q", cfg.ClickHouse.Username)
+	}
+	if cfg.ClickHouse.TLSServerName != "clickhouse.internal" {
+		t.Fatalf("expected clickhouse.tls_server_name override, got %q", cfg.ClickHouse.TLSServerName)
+	}
+	if cfg.ClickHouse.CAFile != "/var/run/secrets/clickhouse/ca.crt" {
+		t.Fatalf("expected clickhouse.ca_file override, got %q", cfg.ClickHouse.CAFile)
 	}
 	if cfg.ClickHouse.ConsumerName != "tap_clickhouse_sink_blue" {
 		t.Fatalf("expected clickhouse.consumer_name override, got %q", cfg.ClickHouse.ConsumerName)
@@ -635,6 +646,52 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 			wantErrSub: "clickhouse.insecure_skip_verify",
 		},
 		{
+			name: "clickhouse tls server name requires secure",
+			cfg: Config{
+				NATS: NATSConfig{
+					URL:           "nats://localhost:4222",
+					Stream:        "ENSEMBLE_TAP",
+					SubjectPrefix: "ensemble.tap",
+				},
+				ClickHouse: ClickHouseConfig{
+					Addr:          "clickhouse:9000",
+					TLSServerName: "clickhouse.internal",
+				},
+			},
+			wantErrSub: "clickhouse.tls_server_name",
+		},
+		{
+			name: "clickhouse cert and key files must be paired",
+			cfg: Config{
+				NATS: NATSConfig{
+					URL:           "nats://localhost:4222",
+					Stream:        "ENSEMBLE_TAP",
+					SubjectPrefix: "ensemble.tap",
+				},
+				ClickHouse: ClickHouseConfig{
+					Addr:                  "clickhouse:9000",
+					Secure:                true,
+					CertFile:              "/var/run/secrets/clickhouse/client.crt",
+					ConsumerName:          "tap_clickhouse_sink",
+					Database:              "ensemble",
+					Table:                 "tap_events",
+					Username:              "default",
+					DialTimeout:           5 * time.Second,
+					MaxOpenConns:          4,
+					MaxIdleConns:          2,
+					BatchSize:             500,
+					FlushInterval:         2 * time.Second,
+					ConsumerFetchBatch:    100,
+					ConsumerFetchMaxWait:  500 * time.Millisecond,
+					ConsumerAckWait:       30 * time.Second,
+					ConsumerMaxAckPending: 1000,
+					InsertTimeout:         10 * time.Second,
+					RetentionTTL:          365 * 24 * time.Hour,
+				},
+			},
+			wantErrSub: "clickhouse.cert_file and clickhouse.key_file",
+		},
+		{
 			name: "clickhouse addr requires host and port",
 			cfg: Config{
 				NATS: NATSConfig{
@@ -739,6 +796,8 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 					Username:              "default",
 					Password:              "secret",
 					Secure:                true,
+					TLSServerName:         "clickhouse.internal",
+					CAFile:                "/var/run/secrets/clickhouse/ca.crt",
 					DialTimeout:           5 * time.Second,
 					MaxOpenConns:          8,
 					MaxIdleConns:          4,

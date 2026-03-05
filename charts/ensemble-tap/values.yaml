@@ -167,6 +167,10 @@ config:
     password: ${CLICKHOUSE_PASSWORD}
     secure: false
     insecure_skip_verify: false
+    tls_server_name: ""
+    ca_file: ""
+    cert_file: ""
+    key_file: ""
     dial_timeout: 5s
     max_open_conns: 4
     max_idle_conns: 2
