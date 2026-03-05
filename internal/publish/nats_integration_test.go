@@ -3,6 +3,8 @@ package publish
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -274,6 +276,12 @@ func TestNormalizeNATSRuntimeConfigDefaults(t *testing.T) {
 	if cfg.PublishTimeout != 5*time.Second {
 		t.Fatalf("expected default publish timeout, got %s", cfg.PublishTimeout)
 	}
+	if cfg.PublishMaxRetries != 3 {
+		t.Fatalf("expected default publish max retries 3, got %d", cfg.PublishMaxRetries)
+	}
+	if cfg.PublishRetryBackoff != 100*time.Millisecond {
+		t.Fatalf("expected default publish retry backoff 100ms, got %s", cfg.PublishRetryBackoff)
+	}
 	if cfg.StreamReplicas != 1 {
 		t.Fatalf("expected default stream replicas 1, got %d", cfg.StreamReplicas)
 	}
@@ -297,5 +305,73 @@ func TestStreamStorageAndDiscardPolicyMapping(t *testing.T) {
 	}
 	if got := streamDiscardPolicy("old"); got != nats.DiscardOld {
 		t.Fatalf("expected discard old mapping, got %v", got)
+	}
+}
+
+func TestNATSAuthOptionsSelection(t *testing.T) {
+	if opts := natsAuthOptions(config.NATSConfig{}); len(opts) != 0 {
+		t.Fatalf("expected no auth options, got %d", len(opts))
+	}
+	if opts := natsAuthOptions(config.NATSConfig{Username: "u", Password: "p"}); len(opts) != 1 {
+		t.Fatalf("expected one user/pass auth option, got %d", len(opts))
+	}
+	if opts := natsAuthOptions(config.NATSConfig{Token: "token"}); len(opts) != 1 {
+		t.Fatalf("expected one token auth option, got %d", len(opts))
+	}
+	if opts := natsAuthOptions(config.NATSConfig{CredsFile: "/tmp/nats.creds", Token: "token"}); len(opts) != 1 {
+		t.Fatalf("expected creds_file auth to take precedence, got %d options", len(opts))
+	}
+}
+
+func TestNATSTLSOptionsSelection(t *testing.T) {
+	opts, err := natsTLSOptions(config.NATSConfig{})
+	if err != nil {
+		t.Fatalf("expected no tls option error, got %v", err)
+	}
+	if len(opts) != 0 {
+		t.Fatalf("expected no tls options, got %d", len(opts))
+	}
+
+	opts, err = natsTLSOptions(config.NATSConfig{Secure: true})
+	if err != nil {
+		t.Fatalf("expected secure tls options without error, got %v", err)
+	}
+	if len(opts) != 1 {
+		t.Fatalf("expected one tls option, got %d", len(opts))
+	}
+
+	_, err = natsTLSOptions(config.NATSConfig{Secure: true, CAFile: "/tmp/not-found-ca.pem"})
+	if err == nil {
+		t.Fatalf("expected missing ca_file to error")
+	}
+
+	badCA := t.TempDir() + "/bad-ca.pem"
+	if writeErr := os.WriteFile(badCA, []byte("not-a-cert"), 0o600); writeErr != nil {
+		t.Fatalf("write bad ca file: %v", writeErr)
+	}
+	_, err = natsTLSOptions(config.NATSConfig{Secure: true, CAFile: badCA})
+	if err == nil {
+		t.Fatalf("expected malformed ca_file to error")
+	}
+}
+
+func TestShouldRetryNATSPublish(t *testing.T) {
+	if shouldRetryNATSPublish(nil) {
+		t.Fatalf("expected nil error to be non-retryable")
+	}
+	if shouldRetryNATSPublish(context.Canceled) {
+		t.Fatalf("expected canceled context error to be non-retryable")
+	}
+	if shouldRetryNATSPublish(context.DeadlineExceeded) {
+		t.Fatalf("expected deadline exceeded to be non-retryable")
+	}
+	if !shouldRetryNATSPublish(errors.New("temporary network")) {
+		t.Fatalf("expected generic error to be retryable")
+	}
+	if shouldRetryNATSPublish(&nats.APIError{Code: 400}) {
+		t.Fatalf("expected 4xx API error to be non-retryable")
+	}
+	if !shouldRetryNATSPublish(&nats.APIError{Code: 503}) {
+		t.Fatalf("expected 5xx API error to be retryable")
 	}
 }

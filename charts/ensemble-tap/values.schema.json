@@ -52,6 +52,52 @@
               "type": "string",
               "description": "Timeout for one NATS publish attempt."
             },
+            "publish_max_retries": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000,
+              "description": "Maximum publish retries after the initial NATS publish attempt."
+            },
+            "publish_retry_backoff": {
+              "type": "string",
+              "description": "Base exponential backoff for NATS publish retries."
+            },
+            "username": {
+              "type": "string",
+              "description": "Optional NATS username."
+            },
+            "password": {
+              "type": "string",
+              "description": "Optional NATS password."
+            },
+            "token": {
+              "type": "string",
+              "description": "Optional NATS token auth."
+            },
+            "creds_file": {
+              "type": "string",
+              "description": "Optional NATS creds file path."
+            },
+            "secure": {
+              "type": "boolean",
+              "description": "Use TLS for NATS client connections."
+            },
+            "insecure_skip_verify": {
+              "type": "boolean",
+              "description": "Skip NATS TLS certificate verification (use only for trusted internal endpoints)."
+            },
+            "ca_file": {
+              "type": "string",
+              "description": "Optional path to a PEM CA bundle used to validate NATS server certificates."
+            },
+            "cert_file": {
+              "type": "string",
+              "description": "Optional path to a PEM client certificate for mTLS to NATS."
+            },
+            "key_file": {
+              "type": "string",
+              "description": "Optional path to a PEM private key for mTLS to NATS."
+            },
             "stream_replicas": {
               "type": "integer",
               "minimum": 1,
@@ -66,8 +112,171 @@
               "type": "string",
               "enum": ["old", "new"],
               "description": "JetStream discard policy when limits are reached."
+            },
+            "stream_max_msgs": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Maximum retained messages in JetStream stream (0 means unlimited)."
+            },
+            "stream_max_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Maximum retained bytes in JetStream stream (0 means unlimited)."
+            },
+            "stream_max_msg_size": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Maximum message size accepted by JetStream stream in bytes (0 means unlimited)."
             }
-          }
+          },
+          "allOf": [
+            {
+              "if": {
+                "required": ["password"],
+                "properties": {
+                  "password": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "then": {
+                "required": ["username"],
+                "properties": {
+                  "username": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "required": ["token"],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "username": {
+                    "maxLength": 0
+                  },
+                  "password": {
+                    "maxLength": 0
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "required": ["creds_file"],
+                "properties": {
+                  "creds_file": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "username": {
+                    "maxLength": 0
+                  },
+                  "password": {
+                    "maxLength": 0
+                  },
+                  "token": {
+                    "maxLength": 0
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "required": ["insecure_skip_verify"],
+                "properties": {
+                  "insecure_skip_verify": {
+                    "const": true
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "secure": {
+                    "const": true
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "required": ["ca_file"],
+                "properties": {
+                  "ca_file": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "secure": {
+                    "const": true
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "required": ["cert_file"],
+                "properties": {
+                  "cert_file": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "then": {
+                "required": ["key_file"],
+                "properties": {
+                  "key_file": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "secure": {
+                    "const": true
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "required": ["key_file"],
+                "properties": {
+                  "key_file": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "then": {
+                "required": ["cert_file"],
+                "properties": {
+                  "cert_file": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "secure": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          ]
         },
         "clickhouse": {
           "type": "object",
@@ -130,6 +339,11 @@
               "type": "string",
               "description": "Maximum interval before flushing pending ClickHouse rows."
             },
+            "consumer_name": {
+              "type": "string",
+              "minLength": 1,
+              "description": "NATS durable consumer name used by ClickHouse sink."
+            },
             "consumer_fetch_batch_size": {
               "type": "integer",
               "minimum": 1,
@@ -151,6 +365,10 @@
             "insert_timeout": {
               "type": "string",
               "description": "Timeout for a single ClickHouse insert flush."
+            },
+            "retention_ttl": {
+              "type": "string",
+              "description": "Retention TTL for ClickHouse table rows based on event time."
             }
           },
           "allOf": [
@@ -347,6 +565,18 @@
           "secretName": { "type": "string", "minLength": 1 },
           "secretKey": { "type": "string", "minLength": 1 }
         }
+      }
+    },
+    "extraVolumeMounts": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "extraVolumes": {
+      "type": "array",
+      "items": {
+        "type": "object"
       }
     },
     "podDisruptionBudget": {

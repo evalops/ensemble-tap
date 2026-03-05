@@ -86,9 +86,17 @@ helm upgrade --install ensemble-tap ./charts/ensemble-tap \
   --set config.nats.reconnect_wait=2s \
   --set config.nats.max_reconnects=-1 \
   --set config.nats.publish_timeout=5s \
+  --set config.nats.publish_max_retries=3 \
+  --set config.nats.publish_retry_backoff=100ms \
+  --set config.nats.secure=true \
+  --set config.nats.ca_file=/var/run/ensemble-tap/nats/ca.crt \
+  --set config.nats.creds_file=/var/run/ensemble-tap/nats/client.creds \
   --set config.nats.stream_replicas=3 \
   --set config.nats.stream_storage=file \
   --set config.nats.stream_discard=old \
+  --set config.nats.stream_max_msgs=5000000 \
+  --set config.nats.stream_max_bytes=21474836480 \
+  --set config.nats.stream_max_msg_size=1048576 \
   --set config.clickhouse.addr='clickhouse-a:9000,clickhouse-b:9000' \
   --set config.clickhouse.username=default \
   --set config.clickhouse.password='${CLICKHOUSE_PASSWORD}' \
@@ -97,12 +105,24 @@ helm upgrade --install ensemble-tap ./charts/ensemble-tap \
   --set config.clickhouse.max_open_conns=8 \
   --set config.clickhouse.max_idle_conns=4 \
   --set config.clickhouse.conn_max_lifetime=30m \
+  --set config.clickhouse.consumer_name=tap_clickhouse_sink_prod \
   --set config.clickhouse.consumer_fetch_batch_size=200 \
   --set config.clickhouse.consumer_fetch_max_wait=750ms \
   --set config.clickhouse.consumer_ack_wait=45s \
   --set config.clickhouse.consumer_max_ack_pending=2000 \
-  --set config.clickhouse.insert_timeout=15s
+  --set config.clickhouse.insert_timeout=15s \
+  --set config.clickhouse.retention_ttl=2160h \
+  --set extraVolumes[0].name=nats-auth \
+  --set extraVolumes[0].secret.secretName=ensemble-tap-nats-auth \
+  --set extraVolumeMounts[0].name=nats-auth \
+  --set extraVolumeMounts[0].mountPath=/var/run/ensemble-tap/nats \
+  --set extraVolumeMounts[0].readOnly=true
 ```
+
+Auth notes:
+- Use only one NATS auth mode at a time: `username/password`, `token`, or `creds_file`.
+- If NATS TLS files are used (`ca_file`, `cert_file`, `key_file`), set `config.nats.secure=true` and mount files via `extraVolumes` + `extraVolumeMounts`.
+- If `config.clickhouse.insecure_skip_verify=true`, `config.clickhouse.secure` must also be `true`.
 
 ## Ops hardening defaults
 

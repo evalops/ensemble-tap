@@ -59,6 +59,8 @@ const (
 	defaultClickHouseAckWait    = 30 * time.Second
 	defaultClickHouseAckPending = 1000
 	defaultClickHouseInsertTO   = 10 * time.Second
+	defaultClickHouseConsumer   = "tap_clickhouse_sink"
+	defaultClickHouseRetention  = 365 * 24 * time.Hour
 )
 
 func NewClickHouseSink(ctx context.Context, cfg config.ClickHouseConfig, natsCfg config.NATSConfig, js nats.JetStreamContext, metrics *health.Metrics) (*ClickHouseSink, error) {
@@ -97,6 +99,7 @@ func NewClickHouseSink(ctx context.Context, cfg config.ClickHouseConfig, natsCfg
 		conn:    conn,
 	}
 	if err := sink.initSchema(ctx); err != nil {
+		_ = conn.Close()
 		return nil, err
 	}
 	return sink, nil
@@ -105,6 +108,10 @@ func NewClickHouseSink(ctx context.Context, cfg config.ClickHouseConfig, natsCfg
 func (s *ClickHouseSink) initSchema(ctx context.Context) error {
 	if err := s.conn.Exec(ctx, fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", s.cfg.Database)); err != nil {
 		return fmt.Errorf("create database: %w", err)
+	}
+	ttlSeconds := int64(s.cfg.RetentionTTL / time.Second)
+	if ttlSeconds <= 0 {
+		ttlSeconds = int64(defaultClickHouseRetention / time.Second)
 	}
 	query := fmt.Sprintf(`
 CREATE TABLE IF NOT EXISTS %s.%s (
@@ -126,8 +133,8 @@ CREATE TABLE IF NOT EXISTS %s.%s (
 ENGINE = MergeTree()
 PARTITION BY toYYYYMM(time)
 ORDER BY (provider, entity_type, time, id)
-TTL toDateTime(time) + INTERVAL 1 YEAR
-SETTINGS index_granularity = 8192`, s.cfg.Database, s.cfg.Table)
+TTL toDateTime(time) + INTERVAL %d SECOND
+SETTINGS index_granularity = 8192`, s.cfg.Database, s.cfg.Table, ttlSeconds)
 
 	if err := s.conn.Exec(ctx, query); err != nil {
 		return fmt.Errorf("create table: %w", err)
@@ -144,7 +151,7 @@ func (s *ClickHouseSink) Start(ctx context.Context) error {
 	subject := strings.TrimSuffix(s.natsCfg.SubjectPrefix, ".") + ".>"
 	sub, err := s.js.PullSubscribe(
 		subject,
-		"tap_clickhouse_sink",
+		s.cfg.ConsumerName,
 		nats.BindStream(s.natsCfg.Stream),
 		nats.ManualAck(),
 		nats.AckWait(s.cfg.ConsumerAckWait),
@@ -369,6 +376,10 @@ func normalizeClickHouseRuntimeConfig(cfg config.ClickHouseConfig) config.ClickH
 	if cfg.FlushInterval <= 0 {
 		cfg.FlushInterval = defaultClickHouseFlushEvery
 	}
+	cfg.ConsumerName = strings.TrimSpace(cfg.ConsumerName)
+	if cfg.ConsumerName == "" {
+		cfg.ConsumerName = defaultClickHouseConsumer
+	}
 	if cfg.ConsumerFetchBatch <= 0 {
 		cfg.ConsumerFetchBatch = defaultClickHouseFetchBatch
 	}
@@ -383,6 +394,9 @@ func normalizeClickHouseRuntimeConfig(cfg config.ClickHouseConfig) config.ClickH
 	}
 	if cfg.InsertTimeout <= 0 {
 		cfg.InsertTimeout = defaultClickHouseInsertTO
+	}
+	if cfg.RetentionTTL <= 0 {
+		cfg.RetentionTTL = defaultClickHouseRetention
 	}
 	return cfg
 }

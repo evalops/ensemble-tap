@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"sort"
@@ -21,6 +22,8 @@ const (
 	defaultNATSReconnectWait     = 2 * time.Second
 	defaultNATSMaxReconnects     = -1
 	defaultNATSPublishTimeout    = 5 * time.Second
+	defaultNATSPublishRetries    = 3
+	defaultNATSPublishRetryDelay = 100 * time.Millisecond
 	defaultNATSStreamReplicas    = 1
 	defaultNATSStreamStorage     = "file"
 	defaultNATSStreamDiscard     = "old"
@@ -29,11 +32,15 @@ const (
 	defaultClickHouseMaxOpen     = 4
 	defaultClickHouseMaxIdle     = 2
 	defaultClickHouseConnMaxLife = 30 * time.Minute
+	defaultClickHouseBatchSize   = 500
+	defaultClickHouseFlushEvery  = 2 * time.Second
 	defaultClickHouseFetchBatch  = 100
 	defaultClickHouseFetchWait   = 500 * time.Millisecond
 	defaultClickHouseAckWait     = 30 * time.Second
 	defaultClickHouseAckPending  = 1000
 	defaultClickHouseInsertTO    = 10 * time.Second
+	defaultClickHouseConsumer    = "tap_clickhouse_sink"
+	defaultClickHouseRetention   = 365 * 24 * time.Hour
 	defaultAdminReplayMaxLimit   = 2000
 	maxAdminReplayMaxLimit       = 100000
 	defaultAdminReplayJobTTL     = 24 * time.Hour
@@ -120,9 +127,23 @@ type NATSConfig struct {
 	ReconnectWait        time.Duration `koanf:"reconnect_wait"`
 	MaxReconnects        int           `koanf:"max_reconnects"`
 	PublishTimeout       time.Duration `koanf:"publish_timeout"`
+	PublishMaxRetries    int           `koanf:"publish_max_retries"`
+	PublishRetryBackoff  time.Duration `koanf:"publish_retry_backoff"`
+	Username             string        `koanf:"username"`
+	Password             string        `koanf:"password"`
+	Token                string        `koanf:"token"`
+	CredsFile            string        `koanf:"creds_file"`
+	Secure               bool          `koanf:"secure"`
+	InsecureSkipVerify   bool          `koanf:"insecure_skip_verify"`
+	CAFile               string        `koanf:"ca_file"`
+	CertFile             string        `koanf:"cert_file"`
+	KeyFile              string        `koanf:"key_file"`
 	StreamReplicas       int           `koanf:"stream_replicas"`
 	StreamStorage        string        `koanf:"stream_storage"`
 	StreamDiscard        string        `koanf:"stream_discard"`
+	StreamMaxMsgs        int64         `koanf:"stream_max_msgs"`
+	StreamMaxBytes       int64         `koanf:"stream_max_bytes"`
+	StreamMaxMsgSize     int           `koanf:"stream_max_msg_size"`
 }
 
 type ClickHouseConfig struct {
@@ -139,11 +160,13 @@ type ClickHouseConfig struct {
 	ConnMaxLifetime       time.Duration `koanf:"conn_max_lifetime"`
 	BatchSize             int           `koanf:"batch_size"`
 	FlushInterval         time.Duration `koanf:"flush_interval"`
+	ConsumerName          string        `koanf:"consumer_name"`
 	ConsumerFetchBatch    int           `koanf:"consumer_fetch_batch_size"`
 	ConsumerFetchMaxWait  time.Duration `koanf:"consumer_fetch_max_wait"`
 	ConsumerAckWait       time.Duration `koanf:"consumer_ack_wait"`
 	ConsumerMaxAckPending int           `koanf:"consumer_max_ack_pending"`
 	InsertTimeout         time.Duration `koanf:"insert_timeout"`
+	RetentionTTL          time.Duration `koanf:"retention_ttl"`
 }
 
 type ServerConfig struct {
@@ -211,6 +234,12 @@ func (c *Config) ApplyDefaults() {
 	if c.NATS.PublishTimeout == 0 {
 		c.NATS.PublishTimeout = defaultNATSPublishTimeout
 	}
+	if c.NATS.PublishMaxRetries == 0 {
+		c.NATS.PublishMaxRetries = defaultNATSPublishRetries
+	}
+	if c.NATS.PublishRetryBackoff == 0 {
+		c.NATS.PublishRetryBackoff = defaultNATSPublishRetryDelay
+	}
 	if c.NATS.StreamReplicas == 0 {
 		c.NATS.StreamReplicas = defaultNATSStreamReplicas
 	}
@@ -242,10 +271,13 @@ func (c *Config) ApplyDefaults() {
 		c.ClickHouse.ConnMaxLifetime = defaultClickHouseConnMaxLife
 	}
 	if c.ClickHouse.BatchSize == 0 {
-		c.ClickHouse.BatchSize = 500
+		c.ClickHouse.BatchSize = defaultClickHouseBatchSize
 	}
 	if c.ClickHouse.FlushInterval == 0 {
-		c.ClickHouse.FlushInterval = 2 * time.Second
+		c.ClickHouse.FlushInterval = defaultClickHouseFlushEvery
+	}
+	if strings.TrimSpace(c.ClickHouse.ConsumerName) == "" {
+		c.ClickHouse.ConsumerName = defaultClickHouseConsumer
 	}
 	if c.ClickHouse.ConsumerFetchBatch == 0 {
 		c.ClickHouse.ConsumerFetchBatch = defaultClickHouseFetchBatch
@@ -261,6 +293,9 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.ClickHouse.InsertTimeout == 0 {
 		c.ClickHouse.InsertTimeout = defaultClickHouseInsertTO
+	}
+	if c.ClickHouse.RetentionTTL == 0 {
+		c.ClickHouse.RetentionTTL = defaultClickHouseRetention
 	}
 	if c.Server.Port == 0 {
 		c.Server.Port = 8080
@@ -435,6 +470,40 @@ func validateNATSConfig(cfg NATSConfig) error {
 	if cfg.PublishTimeout <= 0 {
 		return fmt.Errorf("nats.publish_timeout must be greater than 0")
 	}
+	if cfg.PublishMaxRetries < 0 {
+		return fmt.Errorf("nats.publish_max_retries must be greater than or equal to 0")
+	}
+	if cfg.PublishMaxRetries > 1000 {
+		return fmt.Errorf("nats.publish_max_retries must be less than or equal to 1000")
+	}
+	if cfg.PublishRetryBackoff <= 0 {
+		return fmt.Errorf("nats.publish_retry_backoff must be greater than 0")
+	}
+	username := strings.TrimSpace(cfg.Username)
+	password := strings.TrimSpace(cfg.Password)
+	token := strings.TrimSpace(cfg.Token)
+	creds := strings.TrimSpace(cfg.CredsFile)
+	caFile := strings.TrimSpace(cfg.CAFile)
+	certFile := strings.TrimSpace(cfg.CertFile)
+	keyFile := strings.TrimSpace(cfg.KeyFile)
+	if password != "" && username == "" {
+		return fmt.Errorf("nats.password requires nats.username")
+	}
+	if token != "" && (username != "" || password != "") {
+		return fmt.Errorf("nats.token cannot be combined with nats.username or nats.password")
+	}
+	if creds != "" && (token != "" || username != "" || password != "") {
+		return fmt.Errorf("nats.creds_file cannot be combined with nats.token, nats.username, or nats.password")
+	}
+	if cfg.InsecureSkipVerify && !cfg.Secure {
+		return fmt.Errorf("nats.insecure_skip_verify requires nats.secure=true")
+	}
+	if (caFile != "" || certFile != "" || keyFile != "") && !cfg.Secure {
+		return fmt.Errorf("nats.ca_file, nats.cert_file, and nats.key_file require nats.secure=true")
+	}
+	if (certFile == "") != (keyFile == "") {
+		return fmt.Errorf("nats.cert_file and nats.key_file must be configured together")
+	}
 	if cfg.StreamReplicas <= 0 {
 		return fmt.Errorf("nats.stream_replicas must be greater than 0")
 	}
@@ -449,6 +518,18 @@ func validateNATSConfig(cfg NATSConfig) error {
 	case "old", "new":
 	default:
 		return fmt.Errorf("nats.stream_discard must be one of old|new")
+	}
+	if cfg.StreamMaxMsgs < 0 {
+		return fmt.Errorf("nats.stream_max_msgs must be greater than or equal to 0")
+	}
+	if cfg.StreamMaxBytes < 0 {
+		return fmt.Errorf("nats.stream_max_bytes must be greater than or equal to 0")
+	}
+	if cfg.StreamMaxMsgSize < 0 {
+		return fmt.Errorf("nats.stream_max_msg_size must be greater than or equal to 0")
+	}
+	if cfg.StreamMaxMsgSize > math.MaxInt32 {
+		return fmt.Errorf("nats.stream_max_msg_size must be less than or equal to %d", math.MaxInt32)
 	}
 	return nil
 }
@@ -501,6 +582,13 @@ func validateClickHouseConfig(cfg ClickHouseConfig) error {
 	if cfg.FlushInterval <= 0 {
 		return fmt.Errorf("clickhouse.flush_interval must be greater than 0")
 	}
+	consumerName := strings.TrimSpace(cfg.ConsumerName)
+	if consumerName == "" {
+		return fmt.Errorf("clickhouse.consumer_name must not be empty when clickhouse.addr is configured")
+	}
+	if strings.ContainsAny(consumerName, " \t\r\n") {
+		return fmt.Errorf("clickhouse.consumer_name must not contain whitespace")
+	}
 	if cfg.ConsumerFetchBatch <= 0 {
 		return fmt.Errorf("clickhouse.consumer_fetch_batch_size must be greater than 0")
 	}
@@ -515,6 +603,12 @@ func validateClickHouseConfig(cfg ClickHouseConfig) error {
 	}
 	if cfg.InsertTimeout <= 0 {
 		return fmt.Errorf("clickhouse.insert_timeout must be greater than 0")
+	}
+	if cfg.RetentionTTL <= 0 {
+		return fmt.Errorf("clickhouse.retention_ttl must be greater than 0")
+	}
+	if cfg.InsertTimeout >= cfg.ConsumerAckWait {
+		return fmt.Errorf("clickhouse.insert_timeout must be less than clickhouse.consumer_ack_wait")
 	}
 	return nil
 }

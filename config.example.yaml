@@ -118,9 +118,24 @@ nats:
   reconnect_wait: 2s
   max_reconnects: -1
   publish_timeout: 5s
+  publish_max_retries: 3
+  publish_retry_backoff: 100ms
+  # Set one auth mode only: username/password, token, or creds_file.
+  username: ""
+  password: ""
+  token: ""
+  creds_file: ""
+  secure: false
+  insecure_skip_verify: false
+  ca_file: ""
+  cert_file: ""
+  key_file: ""
   stream_replicas: 1
   stream_storage: file
   stream_discard: old
+  stream_max_msgs: 0
+  stream_max_bytes: 0
+  stream_max_msg_size: 0
 
 clickhouse:
   addr: clickhouse:9000
@@ -136,11 +151,13 @@ clickhouse:
   conn_max_lifetime: 30m
   batch_size: 500
   flush_interval: 2s
+  consumer_name: tap_clickhouse_sink
   consumer_fetch_batch_size: 100
   consumer_fetch_max_wait: 500ms
   consumer_ack_wait: 30s
   consumer_max_ack_pending: 1000
   insert_timeout: 10s
+  retention_ttl: 8760h
 
 server:
   port: 8080

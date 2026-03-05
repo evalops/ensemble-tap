@@ -199,6 +199,12 @@ func TestNormalizeClickHouseRuntimeConfigDefaults(t *testing.T) {
 	if cfg.InsertTimeout != 10*time.Second {
 		t.Fatalf("expected default insert timeout, got %s", cfg.InsertTimeout)
 	}
+	if cfg.ConsumerName != "tap_clickhouse_sink" {
+		t.Fatalf("expected default consumer name, got %q", cfg.ConsumerName)
+	}
+	if cfg.RetentionTTL != 365*24*time.Hour {
+		t.Fatalf("expected default retention ttl 365d, got %s", cfg.RetentionTTL)
+	}
 }
 
 func TestClickHouseAddresses(t *testing.T) {

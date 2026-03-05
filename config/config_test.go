@@ -71,6 +71,12 @@ func TestLoadConfigMissingFileAppliesDefaults(t *testing.T) {
 	if cfg.NATS.PublishTimeout != 5*time.Second {
 		t.Fatalf("expected default nats publish timeout 5s, got %s", cfg.NATS.PublishTimeout)
 	}
+	if cfg.NATS.PublishMaxRetries != 3 {
+		t.Fatalf("expected default nats publish max retries 3, got %d", cfg.NATS.PublishMaxRetries)
+	}
+	if cfg.NATS.PublishRetryBackoff != 100*time.Millisecond {
+		t.Fatalf("expected default nats publish retry backoff 100ms, got %s", cfg.NATS.PublishRetryBackoff)
+	}
 	if cfg.NATS.StreamReplicas != 1 {
 		t.Fatalf("expected default nats stream replicas 1, got %d", cfg.NATS.StreamReplicas)
 	}
@@ -79,6 +85,24 @@ func TestLoadConfigMissingFileAppliesDefaults(t *testing.T) {
 	}
 	if cfg.NATS.StreamDiscard != "old" {
 		t.Fatalf("expected default nats stream discard old, got %q", cfg.NATS.StreamDiscard)
+	}
+	if cfg.NATS.StreamMaxMsgs != 0 {
+		t.Fatalf("expected default nats stream max msgs 0, got %d", cfg.NATS.StreamMaxMsgs)
+	}
+	if cfg.NATS.StreamMaxBytes != 0 {
+		t.Fatalf("expected default nats stream max bytes 0, got %d", cfg.NATS.StreamMaxBytes)
+	}
+	if cfg.NATS.StreamMaxMsgSize != 0 {
+		t.Fatalf("expected default nats stream max msg size 0, got %d", cfg.NATS.StreamMaxMsgSize)
+	}
+	if cfg.NATS.Secure {
+		t.Fatalf("expected default nats secure false")
+	}
+	if cfg.NATS.InsecureSkipVerify {
+		t.Fatalf("expected default nats insecure_skip_verify false")
+	}
+	if cfg.NATS.CAFile != "" || cfg.NATS.CertFile != "" || cfg.NATS.KeyFile != "" {
+		t.Fatalf("expected default nats TLS file paths to be empty")
 	}
 	if cfg.ClickHouse.Username != "default" {
 		t.Fatalf("expected default clickhouse username default, got %q", cfg.ClickHouse.Username)
@@ -109,6 +133,12 @@ func TestLoadConfigMissingFileAppliesDefaults(t *testing.T) {
 	}
 	if cfg.ClickHouse.InsertTimeout != 10*time.Second {
 		t.Fatalf("expected default clickhouse insert timeout 10s, got %s", cfg.ClickHouse.InsertTimeout)
+	}
+	if cfg.ClickHouse.ConsumerName != "tap_clickhouse_sink" {
+		t.Fatalf("expected default clickhouse consumer name tap_clickhouse_sink, got %q", cfg.ClickHouse.ConsumerName)
+	}
+	if cfg.ClickHouse.RetentionTTL != 365*24*time.Hour {
+		t.Fatalf("expected default clickhouse retention ttl 8760h, got %s", cfg.ClickHouse.RetentionTTL)
 	}
 	if cfg.Server.Port != 8080 {
 		t.Fatalf("expected default server port, got %d", cfg.Server.Port)
@@ -163,6 +193,11 @@ func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
 	t.Setenv("TAP_NATS_SUBJECT_PREFIX", "ensemble.tap.custom")
 	t.Setenv("TAP_NATS_CONNECT_TIMEOUT", "9s")
 	t.Setenv("TAP_NATS_MAX_RECONNECTS", "12")
+	t.Setenv("TAP_NATS_PUBLISH_MAX_RETRIES", "7")
+	t.Setenv("TAP_NATS_USERNAME", "ops-nats")
+	t.Setenv("TAP_NATS_PASSWORD", "ops-pass")
+	t.Setenv("TAP_NATS_SECURE", "true")
+	t.Setenv("TAP_NATS_CA_FILE", "/var/run/secrets/nats/ca.crt")
 	t.Setenv("TAP_SERVER_MAX_BODY_SIZE", "2097152")
 	t.Setenv("TAP_SERVER_ADMIN_REPLAY_MAX_LIMIT", "1234")
 	t.Setenv("TAP_SERVER_ADMIN_REPLAY_JOB_TTL", "12h")
@@ -185,6 +220,8 @@ func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
 	t.Setenv("TAP_CLICKHOUSE_FLUSH_INTERVAL", "3s")
 	t.Setenv("TAP_CLICKHOUSE_MAX_OPEN_CONNS", "9")
 	t.Setenv("TAP_CLICKHOUSE_USERNAME", "ops")
+	t.Setenv("TAP_CLICKHOUSE_CONSUMER_NAME", "tap_clickhouse_sink_blue")
+	t.Setenv("TAP_CLICKHOUSE_RETENTION_TTL", "720h")
 	t.Setenv("TAP_PROVIDERS_STRIPE_SECRET", "whsec_env")
 	t.Setenv("TAP_PROVIDERS_HUBSPOT_CLIENT_SECRET", "hs_client_secret")
 
@@ -201,6 +238,18 @@ func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
 	}
 	if cfg.NATS.MaxReconnects != 12 {
 		t.Fatalf("expected nats.max_reconnects override, got %d", cfg.NATS.MaxReconnects)
+	}
+	if cfg.NATS.PublishMaxRetries != 7 {
+		t.Fatalf("expected nats.publish_max_retries override, got %d", cfg.NATS.PublishMaxRetries)
+	}
+	if cfg.NATS.Username != "ops-nats" || cfg.NATS.Password != "ops-pass" {
+		t.Fatalf("expected nats username/password override, got %q/%q", cfg.NATS.Username, cfg.NATS.Password)
+	}
+	if !cfg.NATS.Secure {
+		t.Fatalf("expected nats.secure override true")
+	}
+	if cfg.NATS.CAFile != "/var/run/secrets/nats/ca.crt" {
+		t.Fatalf("expected nats.ca_file override, got %q", cfg.NATS.CAFile)
 	}
 	if cfg.Server.MaxBodySize != 2097152 {
 		t.Fatalf("expected server.max_body_size override, got %d", cfg.Server.MaxBodySize)
@@ -267,6 +316,12 @@ func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
 	}
 	if cfg.ClickHouse.Username != "ops" {
 		t.Fatalf("expected clickhouse.username override, got %q", cfg.ClickHouse.Username)
+	}
+	if cfg.ClickHouse.ConsumerName != "tap_clickhouse_sink_blue" {
+		t.Fatalf("expected clickhouse.consumer_name override, got %q", cfg.ClickHouse.ConsumerName)
+	}
+	if cfg.ClickHouse.RetentionTTL != 720*time.Hour {
+		t.Fatalf("expected clickhouse.retention_ttl override, got %s", cfg.ClickHouse.RetentionTTL)
 	}
 	if cfg.Providers["stripe"].Secret != "whsec_env" {
 		t.Fatalf("expected providers.stripe.secret override")
@@ -503,6 +558,68 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 			wantErrSub: "nats.dedup_window",
 		},
 		{
+			name: "nats password requires username",
+			cfg: Config{
+				NATS: NATSConfig{
+					URL:           "nats://localhost:4222",
+					Stream:        "ENSEMBLE_TAP",
+					SubjectPrefix: "ensemble.tap",
+					Password:      "secret",
+				},
+			},
+			wantErrSub: "nats.password requires nats.username",
+		},
+		{
+			name: "nats creds file cannot mix with token",
+			cfg: Config{
+				NATS: NATSConfig{
+					URL:           "nats://localhost:4222",
+					Stream:        "ENSEMBLE_TAP",
+					SubjectPrefix: "ensemble.tap",
+					CredsFile:     "/tmp/nats.creds",
+					Token:         "nats-token",
+				},
+			},
+			wantErrSub: "nats.creds_file",
+		},
+		{
+			name: "nats insecure skip verify requires secure",
+			cfg: Config{
+				NATS: NATSConfig{
+					URL:                "nats://localhost:4222",
+					Stream:             "ENSEMBLE_TAP",
+					SubjectPrefix:      "ensemble.tap",
+					InsecureSkipVerify: true,
+				},
+			},
+			wantErrSub: "nats.insecure_skip_verify",
+		},
+		{
+			name: "nats cert and key files must be paired",
+			cfg: Config{
+				NATS: NATSConfig{
+					URL:           "nats://localhost:4222",
+					Stream:        "ENSEMBLE_TAP",
+					SubjectPrefix: "ensemble.tap",
+					Secure:        true,
+					CertFile:      "/var/run/secrets/nats/client.crt",
+				},
+			},
+			wantErrSub: "nats.cert_file and nats.key_file",
+		},
+		{
+			name: "nats stream max msg size upper bound",
+			cfg: Config{
+				NATS: NATSConfig{
+					URL:              "nats://localhost:4222",
+					Stream:           "ENSEMBLE_TAP",
+					SubjectPrefix:    "ensemble.tap",
+					StreamMaxMsgSize: 2147483648,
+				},
+			},
+			wantErrSub: "nats.stream_max_msg_size",
+		},
+		{
 			name: "clickhouse insecure skip verify requires secure",
 			cfg: Config{
 				NATS: NATSConfig{
@@ -532,21 +649,88 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 			wantErrSub: "clickhouse.addr",
 		},
 		{
+			name: "clickhouse insert timeout must be less than ack wait",
+			cfg: Config{
+				NATS: NATSConfig{
+					URL:           "nats://localhost:4222",
+					Stream:        "ENSEMBLE_TAP",
+					SubjectPrefix: "ensemble.tap",
+				},
+				ClickHouse: ClickHouseConfig{
+					Addr:                  "clickhouse:9000",
+					ConsumerAckWait:       30 * time.Second,
+					InsertTimeout:         30 * time.Second,
+					ConsumerName:          "tap_clickhouse_sink",
+					Database:              "ensemble",
+					Table:                 "tap_events",
+					Username:              "default",
+					DialTimeout:           5 * time.Second,
+					MaxOpenConns:          4,
+					MaxIdleConns:          2,
+					BatchSize:             500,
+					FlushInterval:         2 * time.Second,
+					ConsumerFetchBatch:    100,
+					ConsumerFetchMaxWait:  500 * time.Millisecond,
+					ConsumerMaxAckPending: 1000,
+					RetentionTTL:          365 * 24 * time.Hour,
+				},
+			},
+			wantErrSub: "clickhouse.insert_timeout",
+		},
+		{
+			name: "clickhouse consumer name cannot contain whitespace",
+			cfg: Config{
+				NATS: NATSConfig{
+					URL:           "nats://localhost:4222",
+					Stream:        "ENSEMBLE_TAP",
+					SubjectPrefix: "ensemble.tap",
+				},
+				ClickHouse: ClickHouseConfig{
+					Addr:                  "clickhouse:9000",
+					ConsumerName:          "tap clickhouse sink",
+					Database:              "ensemble",
+					Table:                 "tap_events",
+					Username:              "default",
+					DialTimeout:           5 * time.Second,
+					MaxOpenConns:          4,
+					MaxIdleConns:          2,
+					BatchSize:             500,
+					FlushInterval:         2 * time.Second,
+					ConsumerFetchBatch:    100,
+					ConsumerFetchMaxWait:  500 * time.Millisecond,
+					ConsumerAckWait:       30 * time.Second,
+					ConsumerMaxAckPending: 1000,
+					InsertTimeout:         10 * time.Second,
+					RetentionTTL:          365 * 24 * time.Hour,
+				},
+			},
+			wantErrSub: "clickhouse.consumer_name",
+		},
+		{
 			name: "valid nats and clickhouse tuning config",
 			cfg: Config{
 				NATS: NATSConfig{
-					URL:            "nats://localhost:4222",
-					Stream:         "ENSEMBLE_TAP",
-					SubjectPrefix:  "ensemble.tap",
-					MaxAge:         24 * time.Hour,
-					DedupWindow:    time.Minute,
-					ConnectTimeout: 5 * time.Second,
-					ReconnectWait:  2 * time.Second,
-					MaxReconnects:  -1,
-					PublishTimeout: 5 * time.Second,
-					StreamReplicas: 1,
-					StreamStorage:  "file",
-					StreamDiscard:  "old",
+					URL:                 "nats://localhost:4222",
+					Stream:              "ENSEMBLE_TAP",
+					SubjectPrefix:       "ensemble.tap",
+					MaxAge:              24 * time.Hour,
+					DedupWindow:         time.Minute,
+					ConnectTimeout:      5 * time.Second,
+					ReconnectWait:       2 * time.Second,
+					MaxReconnects:       -1,
+					PublishTimeout:      5 * time.Second,
+					PublishMaxRetries:   3,
+					PublishRetryBackoff: 100 * time.Millisecond,
+					Username:            "nats-user",
+					Password:            "nats-pass",
+					Secure:              true,
+					CAFile:              "/var/run/secrets/nats/ca.crt",
+					StreamReplicas:      1,
+					StreamStorage:       "file",
+					StreamDiscard:       "old",
+					StreamMaxMsgs:       1000000,
+					StreamMaxBytes:      104857600,
+					StreamMaxMsgSize:    1048576,
 				},
 				ClickHouse: ClickHouseConfig{
 					Addr:                  "clickhouse-a:9000,clickhouse-b:9000",
@@ -561,11 +745,13 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 					ConnMaxLifetime:       30 * time.Minute,
 					BatchSize:             500,
 					FlushInterval:         2 * time.Second,
+					ConsumerName:          "tap_clickhouse_sink_prod",
 					ConsumerFetchBatch:    100,
 					ConsumerFetchMaxWait:  500 * time.Millisecond,
 					ConsumerAckWait:       30 * time.Second,
 					ConsumerMaxAckPending: 1000,
 					InsertTimeout:         10 * time.Second,
+					RetentionTTL:          365 * 24 * time.Hour,
 				},
 			},
 		},

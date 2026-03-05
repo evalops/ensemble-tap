@@ -2,8 +2,12 @@ package publish
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -30,6 +34,8 @@ const (
 	defaultNATSReconnectWait  = 2 * time.Second
 	defaultNATSMaxReconnects  = -1
 	defaultNATSPublishTimeout = 5 * time.Second
+	defaultNATSPublishRetries = 3
+	defaultNATSPublishBackoff = 100 * time.Millisecond
 	defaultNATSReplicas       = 1
 	defaultNATSStreamStorage  = "file"
 	defaultNATSStreamDiscard  = "old"
@@ -37,14 +43,20 @@ const (
 
 func NewNATSPublisher(ctx context.Context, cfg config.NATSConfig, metrics *health.Metrics) (*NATSPublisher, error) {
 	cfg = normalizeNATSRuntimeConfig(cfg)
-	nc, err := nats.Connect(
-		cfg.URL,
+	options := []nats.Option{
 		nats.Name("ensemble-tap"),
 		nats.Timeout(cfg.ConnectTimeout),
 		nats.RetryOnFailedConnect(true),
 		nats.MaxReconnects(cfg.MaxReconnects),
 		nats.ReconnectWait(cfg.ReconnectWait),
-	)
+	}
+	options = append(options, natsAuthOptions(cfg)...)
+	tlsOptions, err := natsTLSOptions(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("configure nats tls options: %w", err)
+	}
+	options = append(options, tlsOptions...)
+	nc, err := nats.Connect(cfg.URL, options...)
 	if err != nil {
 		return nil, fmt.Errorf("connect nats: %w", err)
 	}
@@ -100,6 +112,15 @@ func (p *NATSPublisher) ensureStream(_ context.Context) error {
 		Duplicates: p.cfg.DedupWindow,
 		Replicas:   p.cfg.StreamReplicas,
 	}
+	if p.cfg.StreamMaxMsgs > 0 {
+		streamCfg.MaxMsgs = p.cfg.StreamMaxMsgs
+	}
+	if p.cfg.StreamMaxBytes > 0 {
+		streamCfg.MaxBytes = p.cfg.StreamMaxBytes
+	}
+	if p.cfg.StreamMaxMsgSize > 0 {
+		streamCfg.MaxMsgSize = int32(p.cfg.StreamMaxMsgSize)
+	}
 
 	if _, err := p.js.AddStream(streamCfg); err == nil {
 		return nil
@@ -149,7 +170,7 @@ func (p *NATSPublisher) Publish(ctx context.Context, event cloudevents.Event, de
 
 	pubCtx, cancel := context.WithTimeout(ctx, p.cfg.PublishTimeout)
 	defer cancel()
-	ack, err := p.js.PublishMsg(msg, nats.Context(pubCtx))
+	ack, err := p.publishMsgWithRetry(pubCtx, msg)
 	if err != nil {
 		if p.metrics != nil {
 			p.metrics.EventPublishFailuresTotal.WithLabelValues(data.Provider).Inc()
@@ -183,7 +204,7 @@ func (p *NATSPublisher) PublishRaw(ctx context.Context, subject string, payload 
 	}
 	pubCtx, cancel := context.WithTimeout(ctx, p.cfg.PublishTimeout)
 	defer cancel()
-	_, err := p.js.PublishMsg(msg, nats.Context(pubCtx))
+	_, err := p.publishMsgWithRetry(pubCtx, msg)
 	return err
 }
 
@@ -267,6 +288,13 @@ func requestIDFromCloudEventPayload(payload []byte) string {
 }
 
 func normalizeNATSRuntimeConfig(cfg config.NATSConfig) config.NATSConfig {
+	cfg.Username = strings.TrimSpace(cfg.Username)
+	cfg.Password = strings.TrimSpace(cfg.Password)
+	cfg.Token = strings.TrimSpace(cfg.Token)
+	cfg.CredsFile = strings.TrimSpace(cfg.CredsFile)
+	cfg.CAFile = strings.TrimSpace(cfg.CAFile)
+	cfg.CertFile = strings.TrimSpace(cfg.CertFile)
+	cfg.KeyFile = strings.TrimSpace(cfg.KeyFile)
 	if cfg.ConnectTimeout <= 0 {
 		cfg.ConnectTimeout = defaultNATSConnectTimeout
 	}
@@ -278,6 +306,12 @@ func normalizeNATSRuntimeConfig(cfg config.NATSConfig) config.NATSConfig {
 	}
 	if cfg.PublishTimeout <= 0 {
 		cfg.PublishTimeout = defaultNATSPublishTimeout
+	}
+	if cfg.PublishMaxRetries <= 0 {
+		cfg.PublishMaxRetries = defaultNATSPublishRetries
+	}
+	if cfg.PublishRetryBackoff <= 0 {
+		cfg.PublishRetryBackoff = defaultNATSPublishBackoff
 	}
 	if cfg.StreamReplicas <= 0 {
 		cfg.StreamReplicas = defaultNATSReplicas
@@ -307,4 +341,89 @@ func streamDiscardPolicy(raw string) nats.DiscardPolicy {
 	default:
 		return nats.DiscardOld
 	}
+}
+
+func natsAuthOptions(cfg config.NATSConfig) []nats.Option {
+	if cfg.CredsFile != "" {
+		return []nats.Option{nats.UserCredentials(cfg.CredsFile)}
+	}
+	if cfg.Token != "" {
+		return []nats.Option{nats.Token(cfg.Token)}
+	}
+	if cfg.Username != "" {
+		return []nats.Option{nats.UserInfo(cfg.Username, cfg.Password)}
+	}
+	return nil
+}
+
+func natsTLSOptions(cfg config.NATSConfig) ([]nats.Option, error) {
+	if !cfg.Secure && !cfg.InsecureSkipVerify && cfg.CAFile == "" && cfg.CertFile == "" && cfg.KeyFile == "" {
+		return nil, nil
+	}
+
+	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	if cfg.InsecureSkipVerify {
+		// #nosec G402 -- operator-controlled setting for trusted/private NATS deployments.
+		tlsCfg.InsecureSkipVerify = true
+	}
+	if cfg.CAFile != "" {
+		pem, err := os.ReadFile(cfg.CAFile)
+		if err != nil {
+			return nil, fmt.Errorf("read nats ca_file: %w", err)
+		}
+		roots := x509.NewCertPool()
+		if !roots.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("parse nats ca_file: no certificates found")
+		}
+		tlsCfg.RootCAs = roots
+	}
+	if cfg.CertFile != "" || cfg.KeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("load nats client certificate/key pair: %w", err)
+		}
+		tlsCfg.Certificates = []tls.Certificate{cert}
+	}
+
+	return []nats.Option{nats.Secure(tlsCfg)}, nil
+}
+
+func (p *NATSPublisher) publishMsgWithRetry(ctx context.Context, msg *nats.Msg) (*nats.PubAck, error) {
+	maxAttempts := p.cfg.PublishMaxRetries + 1
+	if maxAttempts <= 0 {
+		maxAttempts = 1
+	}
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		ack, err := p.js.PublishMsg(msg, nats.Context(ctx))
+		if err == nil {
+			return ack, nil
+		}
+		lastErr = err
+		if attempt == maxAttempts-1 || !shouldRetryNATSPublish(err) {
+			break
+		}
+		delay := backoff.ExponentialDelay(attempt, p.cfg.PublishRetryBackoff, 2*time.Second)
+		if !backoff.SleepContext(ctx, delay) {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			break
+		}
+	}
+	return nil, lastErr
+}
+
+func shouldRetryNATSPublish(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var apiErr *nats.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Code >= 500
+	}
+	return true
 }

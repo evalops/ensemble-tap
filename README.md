@@ -67,10 +67,15 @@ make ci-local
 ## NATS + ClickHouse Tuning
 
 - `nats.connect_timeout`, `nats.reconnect_wait`, `nats.max_reconnects`, and `nats.publish_timeout` tune connection and publish behavior.
+- `nats.publish_max_retries` and `nats.publish_retry_backoff` tune publish retry resilience for transient JetStream errors.
+- `nats.username/password`, `nats.token`, and `nats.creds_file` are mutually exclusive auth modes.
+- `nats.secure`, `nats.insecure_skip_verify`, `nats.ca_file`, `nats.cert_file`, and `nats.key_file` tune NATS TLS and optional mTLS.
 - `nats.stream_replicas`, `nats.stream_storage` (`file|memory`), and `nats.stream_discard` (`old|new`) tune JetStream durability and pressure behavior.
+- `nats.stream_max_msgs`, `nats.stream_max_bytes`, and `nats.stream_max_msg_size` apply stream-level retention and message-size limits.
 - `clickhouse.username`/`clickhouse.password`, `clickhouse.secure`, and `clickhouse.insecure_skip_verify` tune ClickHouse auth/TLS.
 - `clickhouse.max_open_conns`, `clickhouse.max_idle_conns`, and `clickhouse.conn_max_lifetime` tune connection pool behavior.
-- `clickhouse.consumer_fetch_batch_size`, `clickhouse.consumer_fetch_max_wait`, `clickhouse.consumer_ack_wait`, `clickhouse.consumer_max_ack_pending`, and `clickhouse.insert_timeout` tune sink throughput and ack latency.
+- `clickhouse.consumer_name`, `clickhouse.consumer_fetch_batch_size`, `clickhouse.consumer_fetch_max_wait`, `clickhouse.consumer_ack_wait`, `clickhouse.consumer_max_ack_pending`, and `clickhouse.insert_timeout` tune sink throughput and ack latency.
+- `clickhouse.retention_ttl` controls MergeTree TTL for event-time retention at table level.
 
 ## Admin Endpoints
 
