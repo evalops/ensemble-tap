@@ -51,6 +51,28 @@ docker compose up --build
 - `POST /webhooks/linear`
 - `POST /webhooks/shopify`
 
+## Simplest Onboarding Path (Helm)
+
+Use the guided bootstrap script to get from install to first accepted event with one flow:
+
+```bash
+./scripts/bootstrap.sh
+```
+
+What it does:
+
+- prompts for provider + webhook secret,
+- generates `values.onboarding.yaml`,
+- creates/updates a Kubernetes Secret with webhook credentials,
+- installs/upgrades the Helm release with `--wait`,
+- runs a signed provider-aware webhook smoke test.
+
+Run smoke test only (for an existing install):
+
+```bash
+./scripts/smoke-onboarding.sh --provider generic --release ensemble-tap --namespace ensemble --secret '<your-secret>'
+```
+
 ## Local Development
 
 ```bash

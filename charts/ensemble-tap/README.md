@@ -8,6 +8,12 @@ helm upgrade --install ensemble-tap ./charts/ensemble-tap \
   --create-namespace
 ```
 
+For the fastest setup path (prompted provider secret + Helm install + signed webhook smoke test), run:
+
+```bash
+./scripts/bootstrap.sh
+```
+
 ## Configure providers
 
 The chart renders `config.yaml` from `.Values.config`. Provide provider secrets through environment variables referenced by the config.

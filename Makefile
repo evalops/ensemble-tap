@@ -3,7 +3,7 @@ MIN_COVERAGE ?= 75
 STATICCHECK_VERSION ?= v0.6.1
 STATICCHECK_BIN := $(shell $(GO) env GOPATH)/bin/staticcheck
 
-.PHONY: ci-local test race vet staticcheck staticcheck-install coverage openapi helm-lint helm-template
+.PHONY: ci-local test race vet staticcheck staticcheck-install coverage openapi helm-lint helm-template onboard onboard-smoke
 
 ci-local: vet test race staticcheck coverage openapi helm-lint helm-template
 
@@ -37,3 +37,10 @@ helm-lint:
 
 helm-template:
 	helm template ensemble-tap charts/ensemble-tap >/dev/null
+
+onboard:
+	./scripts/bootstrap.sh
+
+onboard-smoke:
+	@if [ -z "$(ONBOARD_SECRET)" ]; then echo "ONBOARD_SECRET is required"; exit 1; fi
+	./scripts/smoke-onboarding.sh --provider $(or $(ONBOARD_PROVIDER),generic) --release $(or $(ONBOARD_RELEASE),ensemble-tap) --namespace $(or $(ONBOARD_NAMESPACE),ensemble) --secret "$(ONBOARD_SECRET)"
