@@ -86,6 +86,32 @@ Notes:
 - `config.server.admin_rate_limit_per_sec` and `config.server.admin_rate_limit_burst` must both be greater than `0`.
 - `config.server.admin_allowed_cidrs` and `config.server.admin_mtls_required` provide network and client-cert guardrails for admin routes.
 
+## Resolve secrets from Vault
+
+Use `vault://<path>#<key>` in config values and configure `config.vault.*`.
+
+Example (Kubernetes auth):
+
+```bash
+helm upgrade --install ensemble-tap ./charts/ensemble-tap \
+  --namespace ensemble \
+  --set serviceAccount.automount=true \
+  --set env[0].name=VAULT_ADDR \
+  --set env[0].value='https://vault.vault.svc:8200' \
+  --set config.vault.address='${VAULT_ADDR}' \
+  --set config.vault.auth_method=kubernetes \
+  --set config.vault.kubernetes_role=ensemble-tap-runtime \
+  --set config.vault.kubernetes_mount_path=kubernetes \
+  --set config.providers.generic.mode=webhook \
+  --set config.providers.generic.secret='vault://secret/data/homelab/ensemble-tap/runtime#generic-webhook-secret' \
+  --set config.server.admin_token='vault://secret/data/homelab/ensemble-tap/runtime#admin-token'
+```
+
+Notes:
+- `config.vault.auth_method` supports `kubernetes` (default) and `token`.
+- With `token` auth, set `config.vault.token`, `config.vault.token_file`, or `VAULT_TOKEN`.
+- Reference format defaults to key `value` when `#<key>` is omitted (for example `vault://secret/data/path`).
+
 ## Tune NATS and ClickHouse
 
 ```bash

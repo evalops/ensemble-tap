@@ -1,9 +1,13 @@
 package config
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -48,6 +52,8 @@ server:
 }
 
 func TestLoadConfigMissingFileAppliesDefaults(t *testing.T) {
+	t.Setenv("VAULT_ADDR", "")
+
 	cfg, err := Load(filepath.Join(t.TempDir(), "missing.yaml"))
 	if err != nil {
 		t.Fatalf("load missing config file: %v", err)
@@ -212,6 +218,191 @@ func TestLoadConfigMissingFileAppliesDefaults(t *testing.T) {
 	if cfg.Server.AdminMTLSClientCertHeader != "X-Forwarded-Client-Cert" {
 		t.Fatalf("expected default mTLS client cert header, got %q", cfg.Server.AdminMTLSClientCertHeader)
 	}
+	if cfg.Vault.Address != "" {
+		t.Fatalf("expected default vault address empty, got %q", cfg.Vault.Address)
+	}
+	if cfg.Vault.AuthMethod != "kubernetes" {
+		t.Fatalf("expected default vault auth method kubernetes, got %q", cfg.Vault.AuthMethod)
+	}
+	if cfg.Vault.KubernetesMountPath != "kubernetes" {
+		t.Fatalf("expected default vault kubernetes mount path, got %q", cfg.Vault.KubernetesMountPath)
+	}
+	if cfg.Vault.KubernetesJWTFile != "/var/run/secrets/kubernetes.io/serviceaccount/token" {
+		t.Fatalf("expected default vault kubernetes jwt file, got %q", cfg.Vault.KubernetesJWTFile)
+	}
+}
+
+func TestLoadConfigResolvesVaultReferencesWithKubernetesAuth(t *testing.T) {
+	var loginCalls atomic.Int32
+	var readCalls atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/v1/auth/kubernetes/login":
+			loginCalls.Add(1)
+			var payload map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Errorf("decode kubernetes login payload: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if payload["role"] != "ensemble-tap-runtime" {
+				t.Errorf("unexpected vault kubernetes role: %q", payload["role"])
+			}
+			if payload["jwt"] != "k8s-jwt-token" {
+				t.Errorf("unexpected vault kubernetes jwt: %q", payload["jwt"])
+			}
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"auth": map[string]interface{}{
+					"client_token": "vault-runtime-token",
+				},
+			})
+		case r.URL.Path == "/v1/secret/data/homelab/ensemble-tap/runtime":
+			readCalls.Add(1)
+			if got := r.Header.Get("X-Vault-Token"); got != "vault-runtime-token" {
+				t.Errorf("unexpected vault token header: %q", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"data": map[string]interface{}{
+					"data": map[string]interface{}{
+						"generic-webhook-secret": "vault-webhook-secret",
+						"clickhouse-password":    "vault-clickhouse-password",
+						"admin-token":            "vault-admin-token",
+					},
+				},
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	jwtPath := filepath.Join(dir, "jwt")
+	if err := os.WriteFile(jwtPath, []byte("k8s-jwt-token"), 0o600); err != nil {
+		t.Fatalf("write jwt file: %v", err)
+	}
+
+	configPath := filepath.Join(dir, "config.yaml")
+	content := `
+vault:
+  address: ` + server.URL + `
+  auth_method: kubernetes
+  kubernetes_role: ensemble-tap-runtime
+  kubernetes_mount_path: kubernetes
+  kubernetes_jwt_file: ` + jwtPath + `
+providers:
+  generic:
+    mode: webhook
+    secret: 'vault://secret/data/homelab/ensemble-tap/runtime#generic-webhook-secret'
+clickhouse:
+  addr: clickhouse:9000
+  password: 'vault://secret/data/homelab/ensemble-tap/runtime#clickhouse-password'
+server:
+  admin_token: 'vault://secret/data/homelab/ensemble-tap/runtime#admin-token'
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if got := cfg.Providers["generic"].Secret; got != "vault-webhook-secret" {
+		t.Fatalf("expected resolved webhook secret, got %q", got)
+	}
+	if got := cfg.ClickHouse.Password; got != "vault-clickhouse-password" {
+		t.Fatalf("expected resolved clickhouse password, got %q", got)
+	}
+	if got := cfg.Server.AdminToken; got != "vault-admin-token" {
+		t.Fatalf("expected resolved admin token, got %q", got)
+	}
+	if got := loginCalls.Load(); got != 1 {
+		t.Fatalf("expected one kubernetes login call, got %d", got)
+	}
+	if got := readCalls.Load(); got != 1 {
+		t.Fatalf("expected one secret read call due to path cache, got %d", got)
+	}
+}
+
+func TestLoadConfigVaultReferenceRequiresAddress(t *testing.T) {
+	t.Setenv("VAULT_ADDR", "")
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	content := `
+vault:
+  auth_method: token
+  token: test-token
+providers:
+  generic:
+    mode: webhook
+    secret: 'vault://secret/data/homelab/ensemble-tap/runtime#generic-webhook-secret'
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatalf("expected vault address validation error")
+	}
+	if !strings.Contains(err.Error(), "vault.address must not be empty") {
+		t.Fatalf("expected vault address error, got %v", err)
+	}
+}
+
+func TestLoadConfigResolvesVaultReferencesWithTokenAuth(t *testing.T) {
+	var readCalls atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/v1/secret/data/homelab/ensemble-tap/runtime" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		readCalls.Add(1)
+		if got := r.Header.Get("X-Vault-Token"); got != "vault-static-token" {
+			t.Errorf("unexpected vault token header: %q", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"data": map[string]interface{}{
+				"data": map[string]interface{}{
+					"value": "vault-default-value",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	content := `
+vault:
+  address: ` + server.URL + `
+  auth_method: token
+  token: vault-static-token
+providers:
+  generic:
+    mode: webhook
+    secret: 'vault://secret/data/homelab/ensemble-tap/runtime'
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if got := cfg.Providers["generic"].Secret; got != "vault-default-value" {
+		t.Fatalf("expected resolved webhook secret from default key, got %q", got)
+	}
+	if got := readCalls.Load(); got != 1 {
+		t.Fatalf("expected one secret read call, got %d", got)
+	}
 }
 
 func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
@@ -251,6 +442,13 @@ func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
 	t.Setenv("TAP_CLICKHOUSE_CA_FILE", "/var/run/secrets/clickhouse/ca.crt")
 	t.Setenv("TAP_CLICKHOUSE_CONSUMER_NAME", "tap_clickhouse_sink_blue")
 	t.Setenv("TAP_CLICKHOUSE_RETENTION_TTL", "720h")
+	t.Setenv("TAP_VAULT_ADDRESS", "https://vault.example.internal")
+	t.Setenv("TAP_VAULT_NAMESPACE", "homelab")
+	t.Setenv("TAP_VAULT_AUTH_METHOD", "token")
+	t.Setenv("TAP_VAULT_TOKEN_FILE", "/var/run/secrets/vault/token")
+	t.Setenv("TAP_VAULT_KUBERNETES_ROLE", "ensemble-tap-runtime")
+	t.Setenv("TAP_VAULT_KUBERNETES_MOUNT_PATH", "kubernetes-homelab")
+	t.Setenv("TAP_VAULT_KUBERNETES_JWT_FILE", "/var/run/secrets/kubernetes.io/serviceaccount/token")
 	t.Setenv("TAP_PROVIDERS_STRIPE_SECRET", "whsec_env")
 	t.Setenv("TAP_PROVIDERS_HUBSPOT_CLIENT_SECRET", "hs_client_secret")
 
@@ -357,6 +555,27 @@ func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
 	}
 	if cfg.ClickHouse.RetentionTTL != 720*time.Hour {
 		t.Fatalf("expected clickhouse.retention_ttl override, got %s", cfg.ClickHouse.RetentionTTL)
+	}
+	if cfg.Vault.Address != "https://vault.example.internal" {
+		t.Fatalf("expected vault.address override, got %q", cfg.Vault.Address)
+	}
+	if cfg.Vault.Namespace != "homelab" {
+		t.Fatalf("expected vault.namespace override, got %q", cfg.Vault.Namespace)
+	}
+	if cfg.Vault.AuthMethod != "token" {
+		t.Fatalf("expected vault.auth_method override, got %q", cfg.Vault.AuthMethod)
+	}
+	if cfg.Vault.TokenFile != "/var/run/secrets/vault/token" {
+		t.Fatalf("expected vault.token_file override, got %q", cfg.Vault.TokenFile)
+	}
+	if cfg.Vault.KubernetesRole != "ensemble-tap-runtime" {
+		t.Fatalf("expected vault.kubernetes_role override, got %q", cfg.Vault.KubernetesRole)
+	}
+	if cfg.Vault.KubernetesMountPath != "kubernetes-homelab" {
+		t.Fatalf("expected vault.kubernetes_mount_path override, got %q", cfg.Vault.KubernetesMountPath)
+	}
+	if cfg.Vault.KubernetesJWTFile != "/var/run/secrets/kubernetes.io/serviceaccount/token" {
+		t.Fatalf("expected vault.kubernetes_jwt_file override, got %q", cfg.Vault.KubernetesJWTFile)
 	}
 	if cfg.Providers["stripe"].Secret != "whsec_env" {
 		t.Fatalf("expected providers.stripe.secret override")

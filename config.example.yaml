@@ -171,6 +171,21 @@ clickhouse:
   insert_timeout: 10s
   retention_ttl: 8760h
 
+vault:
+  # Optional. If set, any config string with `vault://path#key` is resolved at boot.
+  # `address` also defaults from VAULT_ADDR when omitted.
+  address: ${VAULT_ADDR}
+  namespace: ${VAULT_NAMESPACE}
+  # Supported: kubernetes, token
+  auth_method: kubernetes
+  # Used when auth_method=token. Falls back to VAULT_TOKEN when empty.
+  token: ${VAULT_TOKEN}
+  token_file: ""
+  # Used when auth_method=kubernetes.
+  kubernetes_role: ensemble-tap-runtime
+  kubernetes_mount_path: kubernetes
+  kubernetes_jwt_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+
 server:
   port: 8080
   base_path: /webhooks

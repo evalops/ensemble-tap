@@ -193,6 +193,15 @@ config:
     consumer_max_request_max_bytes: 0
     insert_timeout: 10s
     retention_ttl: 8760h
+  vault:
+    address: ${VAULT_ADDR}
+    namespace: ${VAULT_NAMESPACE}
+    auth_method: kubernetes
+    token: ${VAULT_TOKEN}
+    token_file: ""
+    kubernetes_role: ""
+    kubernetes_mount_path: kubernetes
+    kubernetes_jwt_file: /var/run/secrets/kubernetes.io/serviceaccount/token
   server:
     port: 8080
     base_path: /webhooks

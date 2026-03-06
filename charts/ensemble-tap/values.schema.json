@@ -577,6 +577,45 @@
           ],
           "additionalProperties": false
         },
+        "vault": {
+          "type": "object",
+          "properties": {
+            "address": {
+              "type": "string",
+              "description": "Vault API address. Required when any config field uses vault:// references unless provided via VAULT_ADDR."
+            },
+            "namespace": {
+              "type": "string",
+              "description": "Optional Vault Enterprise namespace header."
+            },
+            "auth_method": {
+              "type": "string",
+              "enum": ["kubernetes", "token"],
+              "description": "Vault auth method used to resolve vault:// references."
+            },
+            "token": {
+              "type": "string",
+              "description": "Vault token used when auth_method=token (falls back to VAULT_TOKEN when empty)."
+            },
+            "token_file": {
+              "type": "string",
+              "description": "Path to a file containing Vault token when auth_method=token."
+            },
+            "kubernetes_role": {
+              "type": "string",
+              "description": "Vault role used when auth_method=kubernetes."
+            },
+            "kubernetes_mount_path": {
+              "type": "string",
+              "description": "Vault Kubernetes auth mount path."
+            },
+            "kubernetes_jwt_file": {
+              "type": "string",
+              "description": "Path to Kubernetes service account JWT used for Vault login."
+            }
+          },
+          "additionalProperties": false
+        },
         "server": {
           "type": "object",
           "properties": {

@@ -66,6 +66,7 @@ type Config struct {
 	Providers  map[string]ProviderConfig `koanf:"providers"`
 	NATS       NATSConfig                `koanf:"nats"`
 	ClickHouse ClickHouseConfig          `koanf:"clickhouse"`
+	Vault      VaultConfig               `koanf:"vault"`
 	Server     ServerConfig              `koanf:"server"`
 	State      StateConfig               `koanf:"state"`
 }
@@ -216,6 +217,17 @@ type ServerConfig struct {
 type StateConfig struct {
 	Backend    string `koanf:"backend"`
 	SQLitePath string `koanf:"sqlite_path"`
+}
+
+type VaultConfig struct {
+	Address             string `koanf:"address"`
+	Namespace           string `koanf:"namespace"`
+	AuthMethod          string `koanf:"auth_method"`
+	Token               string `koanf:"token"`
+	TokenFile           string `koanf:"token_file"`
+	KubernetesRole      string `koanf:"kubernetes_role"`
+	KubernetesMountPath string `koanf:"kubernetes_mount_path"`
+	KubernetesJWTFile   string `koanf:"kubernetes_jwt_file"`
 }
 
 func (c *Config) ApplyDefaults() {
@@ -374,6 +386,18 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.State.SQLitePath == "" {
 		c.State.SQLitePath = "tap-state.db"
+	}
+	if strings.TrimSpace(c.Vault.Address) == "" {
+		c.Vault.Address = strings.TrimSpace(os.Getenv("VAULT_ADDR"))
+	}
+	if strings.TrimSpace(c.Vault.AuthMethod) == "" {
+		c.Vault.AuthMethod = "kubernetes"
+	}
+	if strings.TrimSpace(c.Vault.KubernetesMountPath) == "" {
+		c.Vault.KubernetesMountPath = "kubernetes"
+	}
+	if strings.TrimSpace(c.Vault.KubernetesJWTFile) == "" {
+		c.Vault.KubernetesJWTFile = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 	}
 }
 
@@ -975,6 +999,9 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("decode config: %w", err)
 	}
 	cfg.ApplyDefaults()
+	if err := cfg.resolveVaultReferences(); err != nil {
+		return Config{}, fmt.Errorf("resolve vault references: %w", err)
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, fmt.Errorf("validate config: %w", err)
 	}

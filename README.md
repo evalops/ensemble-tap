@@ -109,6 +109,23 @@ make ci-local
 - ClickHouse sink de-duplicates within each batch and skips IDs already present in ClickHouse before insert; skipped rows are exposed via `tap_clickhouse_dedup_skipped_total`.
 - NATS publish retries and JetStream advisories are exposed via `tap_nats_publish_retries_total{reason}`, `tap_nats_publish_retry_delay_seconds`, and `tap_jetstream_advisories_total{kind}`.
 
+## Vault-backed secrets
+
+Any string config value can be sourced from Vault by using a `vault://` reference:
+
+- Format: `vault://<path>#<key>` (defaults to key `value` when `#<key>` is omitted).
+- Example: `providers.generic.secret: vault://secret/data/homelab/ensemble-tap/runtime#generic-webhook-secret`
+- Example: `server.admin_token: vault://secret/data/homelab/ensemble-tap/runtime#admin-token`
+
+Vault auth config lives under `vault.*`:
+
+- `vault.address` (or `VAULT_ADDR`) and optional `vault.namespace`
+- `vault.auth_method`: `kubernetes` (default) or `token`
+- `vault.auth_method=kubernetes`: set `vault.kubernetes_role`, optional `vault.kubernetes_mount_path` (default `kubernetes`), and optional `vault.kubernetes_jwt_file` (default `/var/run/secrets/kubernetes.io/serviceaccount/token`)
+- `vault.auth_method=token`: set `vault.token`, `vault.token_file`, or `VAULT_TOKEN`
+
+In Kubernetes, if you use `vault.auth_method=kubernetes`, ensure the Pod has a service-account JWT available (for Helm chart: set `serviceAccount.automount=true` or mount a projected token and set `vault.kubernetes_jwt_file` accordingly).
+
 ## Admin Endpoints
 
 When any admin token is configured (`server.admin_token`, `server.admin_token_secondary`, `server.admin_token_read`, `server.admin_token_replay`, `server.admin_token_cancel`), these endpoints are available:
