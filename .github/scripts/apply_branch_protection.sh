@@ -21,19 +21,19 @@ cat >"$payload_file" <<JSON
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": [
-      "CI / test",
-      "CI / staticcheck",
-      "CI / openapi-contract",
-      "CI / config-lint",
-      "CI / docker-build",
-      "CI / helm-lint",
-      "CI / security-gosec",
-      "CI / security-govulncheck",
-      "CI / security-trivy",
-      "CI / security-sbom",
-      "CI / perf-smoke",
-      "CI / integration"
+    "checks": [
+      {"context": "test", "app_id": 15368},
+      {"context": "staticcheck", "app_id": 15368},
+      {"context": "openapi-contract", "app_id": 15368},
+      {"context": "config-lint", "app_id": 15368},
+      {"context": "docker-build", "app_id": 15368},
+      {"context": "helm-lint", "app_id": 15368},
+      {"context": "security-gosec", "app_id": 15368},
+      {"context": "security-govulncheck", "app_id": 15368},
+      {"context": "security-trivy", "app_id": 15368},
+      {"context": "security-sbom", "app_id": 15368},
+      {"context": "perf-smoke", "app_id": 15368},
+      {"context": "integration", "app_id": 15368}
     ]
   },
   "enforce_admins": true,
