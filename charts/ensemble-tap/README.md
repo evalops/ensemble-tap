@@ -193,8 +193,20 @@ Auth notes:
 - `networkPolicy.enabled=true` with explicit ingress/egress policy stanzas (DNS + HTTPS defaults).
 - `networkPolicy.allowConfigPorts=true` auto-derives NATS/ClickHouse TCP egress ports from `config.nats.url` and `config.clickhouse.addr`.
 - `networkPolicy.extraEgressPorts=[]` allows additive egress TCP ports without rewriting policy blocks.
+- `networkPolicy.natsEgressTo=[]` and `networkPolicy.clickhouseEgressTo=[]` optionally scope derived transport rules to destination selectors (`namespaceSelector`, `podSelector`, `ipBlock`) for least-privilege egress.
 - `envSecrets` supports direct `env` values from secret key references.
 - `autoscaling.customMetrics` enables HPA custom metrics in addition to CPU/memory targets.
+
+Example selector-based transport policy:
+
+```bash
+helm upgrade --install ensemble-tap ./charts/ensemble-tap \
+  --namespace ensemble \
+  --set networkPolicy.allowConfigPorts=true \
+  --set networkPolicy.natsEgressTo[0].namespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=messaging \
+  --set networkPolicy.natsEgressTo[0].podSelector.matchLabels.app=nats \
+  --set networkPolicy.clickhouseEgressTo[0].ipBlock.cidr=10.42.0.0/16
+```
 
 ## Enable sqlite state persistence
 

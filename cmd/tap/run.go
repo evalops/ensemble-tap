@@ -20,6 +20,24 @@ type readiness interface {
 	Ready() error
 }
 
+func readinessChecks(checks ...readiness) func() error {
+	filtered := make([]readiness, 0, len(checks))
+	for _, check := range checks {
+		if check == nil {
+			continue
+		}
+		filtered = append(filtered, check)
+	}
+	return func() error {
+		for _, check := range filtered {
+			if err := check.Ready(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
 const (
 	defaultReplayDLQLimit  = 100
 	maxReplayDLQLimit      = 2000
@@ -100,12 +118,14 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	mux := http.NewServeMux()
 	mux.Handle("/", ingressServer.Routes())
 	mux.Handle("GET /livez", health.LivenessHandler())
-	mux.Handle("GET /readyz", health.ReadinessHandler(func() error {
-		if rd, ok := any(publisher).(readiness); ok {
-			return rd.Ready()
-		}
-		return nil
-	}))
+	var readyChecks []readiness
+	if rd, ok := any(publisher).(readiness); ok {
+		readyChecks = append(readyChecks, rd)
+	}
+	if rd, ok := any(clickhouseSink).(readiness); ok {
+		readyChecks = append(readyChecks, rd)
+	}
+	mux.Handle("GET /readyz", health.ReadinessHandler(readinessChecks(readyChecks...)))
 	mux.Handle("GET /metrics", promhttp.Handler())
 	adminCloser, err := registerAdminRoutes(mux, adminRouteDeps{
 		ctx:            ctx,

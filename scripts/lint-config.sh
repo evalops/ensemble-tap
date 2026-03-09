@@ -56,4 +56,7 @@ fi
 
 go run ./cmd/tap -config "${rendered_config}" -check-config >/dev/null
 
-echo "ok: config lint passed (config.example + Helm-rendered config)"
+echo "==> Checking config surface parity across runtime/example/chart schema"
+go test ./config -run TestConfigSurfaceParity -count=1 >/dev/null
+
+echo "ok: config lint passed (config.example + Helm-rendered config + key parity)"

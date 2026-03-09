@@ -73,9 +73,25 @@ networkPolicy:
   enabled: true
   # Add one TCP egress rule that is auto-derived from config.nats.url and
   # config.clickhouse.addr, plus networkPolicy.extraEgressPorts.
+  # Destination scoping can be applied independently to derived NATS and
+  # ClickHouse rules using natsEgressTo/clickhouseEgressTo.
   allowConfigPorts: true
   # Additional egress TCP ports to allow cluster-wide.
   extraEgressPorts: []
+  # Optional destination selectors for derived NATS ports.
+  # natsEgressTo:
+  #   - namespaceSelector:
+  #       matchLabels:
+  #         kubernetes.io/metadata.name: messaging
+  #     podSelector:
+  #       matchLabels:
+  #         app: nats
+  natsEgressTo: []
+  # Optional destination selectors for derived ClickHouse ports.
+  # clickhouseEgressTo:
+  #   - ipBlock:
+  #       cidr: 10.42.0.0/16
+  clickhouseEgressTo: []
   ingress:
     - ports:
         - protocol: TCP
@@ -226,6 +242,9 @@ config:
     admin_replay_max_queued_per_token: 20
     admin_rate_limit_per_sec: 5
     admin_rate_limit_burst: 20
+    admin_allowed_cidrs: []
+    admin_mtls_required: false
+    admin_mtls_client_cert_header: X-Forwarded-Client-Cert
   state:
     backend: memory
     sqlite_path: /var/lib/ensemble-tap/state/tap-state.db

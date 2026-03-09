@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GOTOOLCHAIN: go1.24.13
+  GOTOOLCHAIN: go1.26.1
   TOOLS_BIN: ${{ github.workspace }}/.cache/tools/bin
   STATICCHECK_VERSION: v0.6.1
   GOSEC_VERSION: v2.23.0
@@ -27,7 +27,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: "1.26.1"
 
       - name: Vet
         run: go vet ./...
@@ -59,7 +59,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: "1.26.1"
 
       - name: Restore tool cache
         id: staticcheck-cache
@@ -87,7 +87,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: "1.26.1"
 
       - name: Verify admin OpenAPI contract
         run: go test ./cmd/tap -run TestAdminOpenAPIContractMatchesRuntime -count=1
@@ -102,7 +102,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: "1.26.1"
 
       - name: Setup Helm
         uses: azure/setup-helm@v4
@@ -118,6 +118,9 @@ jobs:
 
       - name: Lint runtime config surfaces
         run: ./scripts/lint-config.sh
+
+      - name: Assert Helm render hardening
+        run: ./scripts/assert-chart-render.sh
 
   docker-build:
     runs-on: ubuntu-latest
@@ -156,7 +159,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: "1.26.1"
 
       - name: Restore tool cache
         id: gosec-cache
@@ -185,7 +188,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: "1.26.1"
 
       - name: Restore tool cache
         id: govulncheck-cache
@@ -202,7 +205,8 @@ jobs:
 
       - name: Run govulncheck
         run: |
-          "${TOOLS_BIN}/govulncheck" ./...
+          GOTOOLCHAIN="${GOTOOLCHAIN}" go build -o ./bin/ensemble-tap ./cmd/tap
+          "${TOOLS_BIN}/govulncheck" -mode=binary ./bin/ensemble-tap
 
   security-trivy:
     runs-on: ubuntu-latest
@@ -255,7 +259,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: "1.26.1"
 
       - name: Setup k6
         uses: grafana/setup-k6-action@v1
@@ -331,7 +335,10 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: "1.26.1"
+
+      - name: Run secure NATS TLS/auth integration tests
+        run: go test ./internal/publish -run 'TestNATSPublisherPublishesWith(TokenAuthOverTLS|UserPassOverTLS)' -count=1
 
       - name: Start NATS + ClickHouse
         run: |

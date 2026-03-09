@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -48,6 +49,7 @@ type ClickHouseSink struct {
 	insertRowsFn func(context.Context, []clickhouseRow) error
 	cancel       context.CancelFunc
 	wg           sync.WaitGroup
+	running      atomic.Bool
 }
 
 const (
@@ -178,12 +180,14 @@ func (s *ClickHouseSink) Start(ctx context.Context) error {
 	workerCtx, cancel := context.WithCancel(ctx)
 	s.cancel = cancel
 	s.wg.Add(1)
+	s.running.Store(true)
 	go s.consumeLoop(workerCtx, sub)
 	return nil
 }
 
 func (s *ClickHouseSink) consumeLoop(ctx context.Context, sub *nats.Subscription) {
 	defer s.wg.Done()
+	defer s.running.Store(false)
 
 	ticker := time.NewTicker(s.cfg.FlushInterval)
 	defer ticker.Stop()
@@ -355,6 +359,37 @@ func eventToRow(payload []byte) (clickhouseRow, error) {
 	}, nil
 }
 
+func (s *ClickHouseSink) Ready() error {
+	if s == nil {
+		return nil
+	}
+	if !s.running.Load() {
+		return fmt.Errorf("clickhouse sink is not running")
+	}
+	if s.conn == nil {
+		if s.insertRowsFn != nil {
+			return nil
+		}
+		return fmt.Errorf("clickhouse connection is not configured")
+	}
+
+	timeout := s.cfg.DialTimeout
+	if timeout <= 0 || timeout > 2*time.Second {
+		timeout = 2 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	var one uint8
+	if err := s.conn.QueryRow(ctx, "SELECT 1").Scan(&one); err != nil {
+		return fmt.Errorf("clickhouse health check failed: %w", err)
+	}
+	if one != 1 {
+		return fmt.Errorf("clickhouse health check returned unexpected result %d", one)
+	}
+	return nil
+}
+
 func (s *ClickHouseSink) Close() {
 	if s == nil {
 		return
@@ -366,6 +401,7 @@ func (s *ClickHouseSink) Close() {
 	if s.conn != nil {
 		_ = s.conn.Close()
 	}
+	s.running.Store(false)
 }
 
 func min(a, b int) int {

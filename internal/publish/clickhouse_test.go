@@ -267,6 +267,31 @@ func TestClickHouseTLSConfigSelection(t *testing.T) {
 	}
 }
 
+func TestNewClickHouseSinkRejectsInvalidTLSFiles(t *testing.T) {
+	sink, err := NewClickHouseSink(
+		context.Background(),
+		config.ClickHouseConfig{
+			Addr:     "127.0.0.1:9000",
+			Database: "ensemble",
+			Table:    "tap_events",
+			Secure:   true,
+			CAFile:   "/tmp/does-not-exist-ca.pem",
+		},
+		config.NATSConfig{},
+		nil,
+		nil,
+	)
+	if err == nil {
+		if sink != nil {
+			sink.Close()
+		}
+		t.Fatalf("expected clickhouse tls configuration error")
+	}
+	if !strings.Contains(err.Error(), "configure clickhouse tls") {
+		t.Fatalf("expected configure clickhouse tls error, got %v", err)
+	}
+}
+
 func TestClickHouseAddresses(t *testing.T) {
 	addrs := clickHouseAddresses(" clickhouse-a:9000, clickhouse-b:9000 ")
 	if len(addrs) != 2 {
@@ -285,6 +310,73 @@ func TestNewClickHouseSinkReturnsNilWhenAddressUnset(t *testing.T) {
 	if sink != nil {
 		t.Fatalf("expected nil sink when clickhouse.addr is not configured")
 	}
+}
+
+func TestClickHouseSinkReady(t *testing.T) {
+	t.Run("running insert mock without connection", func(t *testing.T) {
+		sink := &ClickHouseSink{
+			insertRowsFn: func(context.Context, []clickhouseRow) error { return nil },
+		}
+		sink.running.Store(true)
+		if err := sink.Ready(); err != nil {
+			t.Fatalf("expected sink to be ready with insertRowsFn fallback, got %v", err)
+		}
+	})
+
+	t.Run("fails when not running", func(t *testing.T) {
+		sink := &ClickHouseSink{
+			conn: &mockClickHouseConn{
+				queryRowFn: func(context.Context, string, ...any) chdriver.Row {
+					return &mockReadyRow{value: 1}
+				},
+			},
+		}
+		if err := sink.Ready(); err == nil {
+			t.Fatalf("expected sink readiness to fail when not running")
+		}
+	})
+
+	t.Run("fails when health query errors", func(t *testing.T) {
+		sink := &ClickHouseSink{
+			conn: &mockClickHouseConn{
+				queryRowFn: func(context.Context, string, ...any) chdriver.Row {
+					return &mockReadyRow{err: fmt.Errorf("ping failed")}
+				},
+			},
+		}
+		sink.running.Store(true)
+		if err := sink.Ready(); err == nil || !strings.Contains(err.Error(), "clickhouse health check failed") {
+			t.Fatalf("expected clickhouse health check error, got %v", err)
+		}
+	})
+
+	t.Run("fails on unexpected response value", func(t *testing.T) {
+		sink := &ClickHouseSink{
+			conn: &mockClickHouseConn{
+				queryRowFn: func(context.Context, string, ...any) chdriver.Row {
+					return &mockReadyRow{value: 2}
+				},
+			},
+		}
+		sink.running.Store(true)
+		if err := sink.Ready(); err == nil || !strings.Contains(err.Error(), "unexpected result") {
+			t.Fatalf("expected unexpected-result readiness error, got %v", err)
+		}
+	})
+
+	t.Run("healthy query returns ready", func(t *testing.T) {
+		sink := &ClickHouseSink{
+			conn: &mockClickHouseConn{
+				queryRowFn: func(context.Context, string, ...any) chdriver.Row {
+					return &mockReadyRow{value: 1}
+				},
+			},
+		}
+		sink.running.Store(true)
+		if err := sink.Ready(); err != nil {
+			t.Fatalf("expected sink to be ready, got %v", err)
+		}
+	})
 }
 
 func TestInitSchemaExecutesDDL(t *testing.T) {
@@ -611,6 +703,7 @@ func TestEventToRowFallbackIDPriority(t *testing.T) {
 
 type mockClickHouseConn struct {
 	queryFn        func(context.Context, string, ...any) (chdriver.Rows, error)
+	queryRowFn     func(context.Context, string, ...any) chdriver.Row
 	prepareBatchFn func(context.Context, string, ...chdriver.PrepareBatchOption) (chdriver.Batch, error)
 	execFn         func(context.Context, string, ...any) error
 }
@@ -628,7 +721,10 @@ func (m *mockClickHouseConn) Query(ctx context.Context, query string, args ...an
 	return m.queryFn(ctx, query, args...)
 }
 
-func (m *mockClickHouseConn) QueryRow(_ context.Context, _ string, _ ...any) chdriver.Row {
+func (m *mockClickHouseConn) QueryRow(ctx context.Context, query string, args ...any) chdriver.Row {
+	if m.queryRowFn != nil {
+		return m.queryRowFn(ctx, query, args...)
+	}
 	return &mockRow{err: fmt.Errorf("queryrow not configured")}
 }
 
@@ -745,3 +841,27 @@ type mockBatchColumn struct{}
 func (m *mockBatchColumn) Append(any) error { return nil }
 
 func (m *mockBatchColumn) AppendRow(any) error { return nil }
+
+type mockReadyRow struct {
+	value uint8
+	err   error
+}
+
+func (m *mockReadyRow) Err() error { return m.err }
+
+func (m *mockReadyRow) Scan(dest ...any) error {
+	if m.err != nil {
+		return m.err
+	}
+	if len(dest) != 1 {
+		return fmt.Errorf("expected a single destination value")
+	}
+	target, ok := dest[0].(*uint8)
+	if !ok {
+		return fmt.Errorf("expected *uint8 destination")
+	}
+	*target = m.value
+	return nil
+}
+
+func (m *mockReadyRow) ScanStruct(any) error { return m.err }

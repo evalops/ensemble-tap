@@ -2,9 +2,18 @@ package publish
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
+	"math/big"
+	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -192,6 +201,100 @@ func TestNATSPublisherSetsRequestIDHeader(t *testing.T) {
 	}
 }
 
+func TestNATSPublisherPublishesWithTokenAuthOverTLS(t *testing.T) {
+	certFile, keyFile := writeSelfSignedTLSCert(t)
+	s := runNATSServerWithConfig(t, func(opts *natsserver.Options) {
+		opts.Authorization = "test-token"
+		opts.TLSConfig = mustServerTLSConfig(t, certFile, keyFile)
+	})
+
+	cfg := config.NATSConfig{
+		URL:               "tls://" + s.Addr().String(),
+		Stream:            "ENSEMBLE_TAP_TLS_TOKEN",
+		SubjectPrefix:     "ensemble.tap",
+		MaxAge:            time.Hour,
+		DedupWindow:       2 * time.Minute,
+		Token:             "test-token",
+		Secure:            true,
+		CAFile:            certFile,
+		PublishTimeout:    time.Second,
+		ConnectTimeout:    2 * time.Second,
+		ReconnectWait:     100 * time.Millisecond,
+		MaxReconnects:     2,
+		PublishMaxRetries: 1,
+	}
+
+	ctx := context.Background()
+	pub, err := NewNATSPublisher(ctx, cfg, nil)
+	if err != nil {
+		t.Fatalf("new publisher with token+tls: %v", err)
+	}
+	defer pub.Close()
+
+	evt, err := normalize.ToCloudEvent(normalize.NormalizedEvent{
+		Provider:        "stripe",
+		EntityType:      "invoice",
+		EntityID:        "tls-token-1",
+		Action:          "paid",
+		ProviderEventID: "evt_tls_token_1",
+		ProviderTime:    time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("build cloud event: %v", err)
+	}
+	if _, err := pub.Publish(ctx, evt, "tls_token_1"); err != nil {
+		t.Fatalf("publish event with token+tls: %v", err)
+	}
+}
+
+func TestNATSPublisherPublishesWithUserPassOverTLS(t *testing.T) {
+	certFile, keyFile := writeSelfSignedTLSCert(t)
+	s := runNATSServerWithConfig(t, func(opts *natsserver.Options) {
+		opts.Username = "tap-user"
+		opts.Password = "tap-pass"
+		opts.TLSConfig = mustServerTLSConfig(t, certFile, keyFile)
+	})
+
+	cfg := config.NATSConfig{
+		URL:               "tls://" + s.Addr().String(),
+		Stream:            "ENSEMBLE_TAP_TLS_USERPASS",
+		SubjectPrefix:     "ensemble.tap",
+		MaxAge:            time.Hour,
+		DedupWindow:       2 * time.Minute,
+		Username:          "tap-user",
+		Password:          "tap-pass",
+		Secure:            true,
+		CAFile:            certFile,
+		PublishTimeout:    time.Second,
+		ConnectTimeout:    2 * time.Second,
+		ReconnectWait:     100 * time.Millisecond,
+		MaxReconnects:     2,
+		PublishMaxRetries: 1,
+	}
+
+	ctx := context.Background()
+	pub, err := NewNATSPublisher(ctx, cfg, nil)
+	if err != nil {
+		t.Fatalf("new publisher with userpass+tls: %v", err)
+	}
+	defer pub.Close()
+
+	evt, err := normalize.ToCloudEvent(normalize.NormalizedEvent{
+		Provider:        "stripe",
+		EntityType:      "invoice",
+		EntityID:        "tls-userpass-1",
+		Action:          "paid",
+		ProviderEventID: "evt_tls_userpass_1",
+		ProviderTime:    time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("build cloud event: %v", err)
+	}
+	if _, err := pub.Publish(ctx, evt, "tls_userpass_1"); err != nil {
+		t.Fatalf("publish event with userpass+tls: %v", err)
+	}
+}
+
 func TestNATSPublisherRawInfersRequestIDHeaderFromPayload(t *testing.T) {
 	s := runNATSServer(t)
 	cfg := config.NATSConfig{
@@ -240,6 +343,10 @@ func TestNATSPublisherRawInfersRequestIDHeaderFromPayload(t *testing.T) {
 }
 
 func runNATSServer(t *testing.T) *natsserver.Server {
+	return runNATSServerWithConfig(t, nil)
+}
+
+func runNATSServerWithConfig(t *testing.T, configure func(*natsserver.Options)) *natsserver.Server {
 	t.Helper()
 
 	opts := &natsserver.Options{
@@ -247,6 +354,9 @@ func runNATSServer(t *testing.T) *natsserver.Server {
 		Port:      -1,
 		JetStream: true,
 		StoreDir:  t.TempDir(),
+	}
+	if configure != nil {
+		configure(opts)
 	}
 	s, err := natsserver.NewServer(opts)
 	if err != nil {
@@ -261,6 +371,59 @@ func runNATSServer(t *testing.T) *natsserver.Server {
 		s.WaitForShutdown()
 	})
 	return s
+}
+
+func writeSelfSignedTLSCert(t *testing.T) (string, string) {
+	t.Helper()
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate rsa key: %v", err)
+	}
+
+	serial := big.NewInt(time.Now().UnixNano())
+	template := &x509.Certificate{
+		SerialNumber: serial,
+		Subject: pkix.Name{
+			CommonName: "127.0.0.1",
+		},
+		NotBefore:             time.Now().Add(-1 * time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		DNSNames:              []string{"localhost"},
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create certificate: %v", err)
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	dir := t.TempDir()
+	certFile := filepath.Join(dir, "server.crt")
+	keyFile := filepath.Join(dir, "server.key")
+	if err := os.WriteFile(certFile, certPEM, 0o600); err != nil {
+		t.Fatalf("write certificate: %v", err)
+	}
+	if err := os.WriteFile(keyFile, keyPEM, 0o600); err != nil {
+		t.Fatalf("write private key: %v", err)
+	}
+	return certFile, keyFile
+}
+
+func mustServerTLSConfig(t *testing.T, certFile, keyFile string) *tls.Config {
+	t.Helper()
+	pair, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		t.Fatalf("load x509 key pair: %v", err)
+	}
+	return &tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		Certificates: []tls.Certificate{pair},
+	}
 }
 
 func TestNormalizeNATSRuntimeConfigDefaults(t *testing.T) {

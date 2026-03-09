@@ -6,13 +6,43 @@
   {{- end }}
 {{- end }}
 {{- if .Values.networkPolicy.allowConfigPorts }}
-  {{- $derivedPorts := include "ensemble-tap.networkPolicyConfigPorts" . | fromYamlArray }}
-  {{- $derivedTCP := list }}
-  {{- range $port := $derivedPorts }}
-    {{- $derivedTCP = append $derivedTCP (dict "protocol" "TCP" "port" $port) }}
+  {{- $natsPorts := include "ensemble-tap.networkPolicyNATSPorts" . | fromYamlArray }}
+  {{- $natsTCP := list }}
+  {{- range $port := $natsPorts }}
+    {{- $natsTCP = append $natsTCP (dict "protocol" "TCP" "port" $port) }}
   {{- end }}
-  {{- if gt (len $derivedTCP) 0 }}
-    {{- $egress = append $egress (dict "ports" $derivedTCP) }}
+  {{- if gt (len $natsTCP) 0 }}
+    {{- $natsRule := dict "ports" $natsTCP }}
+    {{- with .Values.networkPolicy.natsEgressTo }}
+      {{- if gt (len .) 0 }}
+        {{- $_ := set $natsRule "to" . }}
+      {{- end }}
+    {{- end }}
+    {{- $egress = append $egress $natsRule }}
+  {{- end }}
+
+  {{- $clickhousePorts := include "ensemble-tap.networkPolicyClickHousePorts" . | fromYamlArray }}
+  {{- $clickhouseTCP := list }}
+  {{- range $port := $clickhousePorts }}
+    {{- $clickhouseTCP = append $clickhouseTCP (dict "protocol" "TCP" "port" $port) }}
+  {{- end }}
+  {{- if gt (len $clickhouseTCP) 0 }}
+    {{- $clickhouseRule := dict "ports" $clickhouseTCP }}
+    {{- with .Values.networkPolicy.clickhouseEgressTo }}
+      {{- if gt (len .) 0 }}
+        {{- $_ := set $clickhouseRule "to" . }}
+      {{- end }}
+    {{- end }}
+    {{- $egress = append $egress $clickhouseRule }}
+  {{- end }}
+
+  {{- $extraPorts := include "ensemble-tap.networkPolicyExtraPorts" . | fromYamlArray }}
+  {{- $extraTCP := list }}
+  {{- range $port := $extraPorts }}
+    {{- $extraTCP = append $extraTCP (dict "protocol" "TCP" "port" $port) }}
+  {{- end }}
+  {{- if gt (len $extraTCP) 0 }}
+    {{- $egress = append $egress (dict "ports" $extraTCP) }}
   {{- end }}
 {{- end }}
 apiVersion: networking.k8s.io/v1

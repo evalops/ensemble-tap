@@ -48,7 +48,7 @@ This file is the operating guide for coding agents working in `ensemble-tap`.
 
 ## 4. Toolchain and Baseline Commands
 
-- Go toolchain: as defined in CI (`go1.24.13` via `GOTOOLCHAIN`).
+- Go toolchain: as defined in CI (`go1.26.1` via `GOTOOLCHAIN`).
 - Core local commands:
   - `go test ./...`
   - `go test -race ./...`

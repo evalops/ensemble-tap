@@ -129,6 +129,37 @@ func TestRunReadinessReflectsNATSDisconnect(t *testing.T) {
 	}
 }
 
+func TestReadinessChecks(t *testing.T) {
+	t.Run("all checks healthy", func(t *testing.T) {
+		check := readinessChecks(
+			testReadiness{err: nil},
+			testReadiness{err: nil},
+		)
+		if err := check(); err != nil {
+			t.Fatalf("expected readiness checks to pass, got %v", err)
+		}
+	})
+
+	t.Run("returns first readiness error", func(t *testing.T) {
+		check := readinessChecks(
+			testReadiness{err: nil},
+			testReadiness{err: fmt.Errorf("clickhouse not ready")},
+			testReadiness{err: fmt.Errorf("should not be reached")},
+		)
+		if err := check(); err == nil || !strings.Contains(err.Error(), "clickhouse not ready") {
+			t.Fatalf("expected clickhouse readiness error, got %v", err)
+		}
+	})
+
+	t.Run("ignores nil checks", func(t *testing.T) {
+		var nilCheck readiness
+		check := readinessChecks(nilCheck)
+		if err := check(); err != nil {
+			t.Fatalf("expected nil readiness checks to pass, got %v", err)
+		}
+	})
+}
+
 func TestRunRejectsInvalidAdminConfig(t *testing.T) {
 	err := run(context.Background(), config.Config{
 		Server: config.ServerConfig{
@@ -2040,6 +2071,14 @@ func freePort(t *testing.T) int {
 	}
 	defer ln.Close()
 	return ln.Addr().(*net.TCPAddr).Port
+}
+
+type testReadiness struct {
+	err error
+}
+
+func (r testReadiness) Ready() error {
+	return r.err
 }
 
 func intToString(v int) string {

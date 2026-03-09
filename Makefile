@@ -3,9 +3,9 @@ MIN_COVERAGE ?= 75
 STATICCHECK_VERSION ?= v0.6.1
 STATICCHECK_BIN := $(shell $(GO) env GOPATH)/bin/staticcheck
 
-.PHONY: ci-local test race vet staticcheck staticcheck-install coverage openapi config-lint helm-lint helm-template onboard onboard-smoke
+.PHONY: ci-local test race vet staticcheck staticcheck-install coverage openapi config-lint chart-assert helm-lint helm-template onboard onboard-smoke
 
-ci-local: vet test race staticcheck coverage openapi config-lint helm-lint helm-template
+ci-local: vet test race staticcheck coverage openapi config-lint chart-assert helm-lint helm-template
 
 test:
 	$(GO) test ./...
@@ -17,10 +17,10 @@ vet:
 	$(GO) vet ./...
 
 staticcheck-install:
-	GOTOOLCHAIN=go1.24.13 $(GO) install honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
+	GOTOOLCHAIN=go1.26.1 $(GO) install honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
 
 staticcheck: staticcheck-install
-	GOTOOLCHAIN=go1.24.13 $(STATICCHECK_BIN) ./...
+	GOTOOLCHAIN=go1.26.1 $(STATICCHECK_BIN) ./...
 
 coverage:
 	$(GO) test ./... -coverprofile=/tmp/ensemble-tap.coverage.out
@@ -34,6 +34,9 @@ openapi:
 
 config-lint:
 	./scripts/lint-config.sh
+
+chart-assert:
+	./scripts/assert-chart-render.sh
 
 helm-lint:
 	helm lint charts/ensemble-tap

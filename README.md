@@ -81,6 +81,7 @@ go test ./...
 go run ./cmd/tap -config ./config.yaml
 go run ./cmd/tap -config ./config.yaml -check-config
 ./scripts/lint-config.sh
+./scripts/assert-chart-render.sh
 make ci-local
 ```
 

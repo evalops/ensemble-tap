@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 
@@ -171,7 +173,7 @@ func newVaultReferenceReader(cfg VaultConfig) (func(path, key string) (string, e
 	case "token":
 		token := strings.TrimSpace(cfg.Token)
 		if token == "" && strings.TrimSpace(cfg.TokenFile) != "" {
-			tokenBytes, readErr := os.ReadFile(strings.TrimSpace(cfg.TokenFile))
+			tokenBytes, readErr := readFileWithinRoot(strings.TrimSpace(cfg.TokenFile))
 			if readErr != nil {
 				return nil, fmt.Errorf("read vault token file: %w", readErr)
 			}
@@ -193,7 +195,7 @@ func newVaultReferenceReader(cfg VaultConfig) (func(path, key string) (string, e
 		if jwtFile == "" {
 			return nil, fmt.Errorf("vault.kubernetes_jwt_file must not be empty for vault.auth_method=kubernetes")
 		}
-		jwtBytes, readErr := os.ReadFile(jwtFile)
+		jwtBytes, readErr := readFileWithinRoot(jwtFile)
 		if readErr != nil {
 			return nil, fmt.Errorf("read vault kubernetes jwt: %w", readErr)
 		}
@@ -251,4 +253,33 @@ func newVaultReferenceReader(cfg VaultConfig) (func(path, key string) (string, e
 		}
 		return fmt.Sprint(rawValue), nil
 	}, nil
+}
+
+func readFileWithinRoot(rawPath string) ([]byte, error) {
+	path := filepath.Clean(strings.TrimSpace(rawPath))
+	if path == "" || path == "." {
+		return nil, fmt.Errorf("file path must not be empty")
+	}
+	if !filepath.IsAbs(path) {
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			return nil, fmt.Errorf("resolve absolute path: %w", err)
+		}
+		path = absPath
+	}
+
+	rootPath := filepath.Dir(path)
+	fileName := filepath.Base(path)
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return nil, fmt.Errorf("open path root %q: %w", rootPath, err)
+	}
+	defer root.Close()
+
+	file, err := root.Open(fileName)
+	if err != nil {
+		return nil, fmt.Errorf("open file %q: %w", path, err)
+	}
+	defer file.Close()
+	return io.ReadAll(file)
 }
