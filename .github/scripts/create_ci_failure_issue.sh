@@ -41,12 +41,8 @@ if [[ ! -s "${failed_file}" ]]; then
   exit 0
 fi
 
-title="CI failure on main: run ${RUN_ID}"
+title="CI failure on main"
 existing_issue="$(gh issue list -R "${REPO}" --state open --search "\"${title}\" in:title" --json number --jq '.[0].number // empty')"
-if [[ -n "${existing_issue}" ]]; then
-  echo "Issue #${existing_issue} already exists for run ${RUN_ID}; skipping"
-  exit 0
-fi
 
 # Ensure label exists for triage routing.
 gh label create ci-failure -R "${REPO}" --description "Automated CI failure reports on main" --color B60205 2>/dev/null || true
@@ -92,6 +88,12 @@ while IFS=$'\t' read -r job_id job_name _job_url; do
     echo "</details>"
   } >>"${body_file}"
 done <"${failed_file}"
+
+if [[ -n "${existing_issue}" ]]; then
+  gh issue comment "${existing_issue}" -R "${REPO}" --body-file "${body_file}" >/dev/null
+  echo "Added CI failure details to existing issue #${existing_issue}"
+  exit 0
+fi
 
 issue_url="$(gh issue create -R "${REPO}" --title "${title}" --body-file "${body_file}" --label ci-failure)"
 echo "Created CI failure issue: ${issue_url}"
