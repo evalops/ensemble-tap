@@ -101,15 +101,18 @@ func TapEventDataFromProto(msg *tapv1.TapEventData) (TapEventData, error) {
 		return TapEventData{}, nil
 	}
 
-	changes := make(map[string]FieldChange, len(msg.GetChanges()))
-	for key, change := range msg.GetChanges() {
-		if change == nil {
-			changes[key] = FieldChange{}
-			continue
-		}
-		changes[key] = FieldChange{
-			From: protoValueToAny(change.GetFrom()),
-			To:   protoValueToAny(change.GetTo()),
+	var changes map[string]FieldChange
+	if msg.Changes != nil {
+		changes = make(map[string]FieldChange, len(msg.Changes))
+		for key, change := range msg.Changes {
+			if change == nil {
+				changes[key] = FieldChange{}
+				continue
+			}
+			changes[key] = FieldChange{
+				From: protoValueToAny(change.GetFrom()),
+				To:   protoValueToAny(change.GetTo()),
+			}
 		}
 	}
 
