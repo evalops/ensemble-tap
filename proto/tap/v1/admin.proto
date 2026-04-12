@@ -1,0 +1,127 @@
+syntax = "proto3";
+
+package tap.v1;
+
+option go_package = "github.com/evalops/ensemble-tap/proto/tap/v1;tapv1";
+
+import "google/protobuf/timestamp.proto";
+
+service TapAdminService {
+  rpc ListReplayJobs(ListReplayJobsRequest) returns (ListReplayJobsResponse);
+  rpc EnqueueReplayJob(EnqueueReplayJobRequest) returns (EnqueueReplayJobResponse);
+  rpc GetReplayJob(GetReplayJobRequest) returns (GetReplayJobResponse);
+  rpc CancelReplayJob(CancelReplayJobRequest) returns (CancelReplayJobResponse);
+  rpc GetPollerStatus(GetPollerStatusRequest) returns (GetPollerStatusResponse);
+}
+
+enum ReplayJobStatus {
+  REPLAY_JOB_STATUS_UNSPECIFIED = 0;
+  REPLAY_JOB_STATUS_QUEUED = 1;
+  REPLAY_JOB_STATUS_RUNNING = 2;
+  REPLAY_JOB_STATUS_SUCCEEDED = 3;
+  REPLAY_JOB_STATUS_FAILED = 4;
+  REPLAY_JOB_STATUS_CANCELLED = 5;
+}
+
+message ReplayJob {
+  string job_id = 1;
+  ReplayJobStatus status = 2;
+  int32 requested_limit = 3;
+  int32 effective_limit = 4;
+  int32 max_limit = 5;
+  bool capped = 6;
+  bool dry_run = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp started_at = 9;
+  google.protobuf.Timestamp completed_at = 10;
+  int32 replayed = 11;
+  string request_id = 12;
+  string operator_reason = 13;
+  string cancel_reason = 14;
+  string error = 15;
+}
+
+message ReplayJobStatusCount {
+  ReplayJobStatus status = 1;
+  int32 count = 2;
+}
+
+message ListReplayJobsRequest {
+  ReplayJobStatus status = 1;
+  int32 limit = 2;
+  string cursor = 3;
+}
+
+message ListReplayJobsResponse {
+  string request_id = 1;
+  ReplayJobStatus status = 2;
+  int32 limit = 3;
+  string cursor = 4;
+  string next_cursor = 5;
+  int32 count = 6;
+  repeated ReplayJobStatusCount summary = 7;
+  repeated ReplayJob jobs = 8;
+}
+
+message EnqueueReplayJobRequest {
+  int32 limit = 1;
+  bool dry_run = 2;
+  string idempotency_key = 3;
+  string admin_reason = 4;
+}
+
+message GetReplayJobRequest {
+  string job_id = 1;
+}
+
+message CancelReplayJobRequest {
+  string job_id = 1;
+  string admin_reason = 2;
+}
+
+message EnqueueReplayJobResponse {
+  string request_id = 1;
+  bool idempotency_reused = 2;
+  ReplayJob job = 3;
+}
+
+message GetPollerStatusRequest {
+  string provider = 1;
+  string tenant = 2;
+}
+
+message GetReplayJobResponse {
+  string request_id = 1;
+  ReplayJob job = 2;
+}
+
+message CancelReplayJobResponse {
+  string request_id = 1;
+  ReplayJob job = 2;
+}
+
+message GetPollerStatusResponse {
+  google.protobuf.Timestamp generated_at = 1;
+  string request_id = 2;
+  string provider = 3;
+  string tenant = 4;
+  int32 count = 5;
+  repeated PollerStatus pollers = 6;
+}
+
+message PollerStatus {
+  string provider = 1;
+  string tenant_id = 2;
+  string interval = 3;
+  double rate_limit_per_sec = 4;
+  int32 burst = 5;
+  int32 failure_budget = 6;
+  string circuit_break_duration = 7;
+  double jitter_ratio = 8;
+  google.protobuf.Timestamp last_run_at = 9;
+  google.protobuf.Timestamp last_success_at = 10;
+  google.protobuf.Timestamp last_error_at = 11;
+  string last_error = 12;
+  string last_checkpoint = 13;
+  int32 consecutive_failures = 14;
+}

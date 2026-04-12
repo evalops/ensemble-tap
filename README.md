@@ -21,6 +21,12 @@ Ensemble Tap is a standalone Go service that ingests SaaS webhook events, normal
   - `POST /admin/replay-dlq?limit=100` creates async replay jobs (with `dry_run` and idempotency support).
   - `GET /admin/replay-dlq/{job_id}` fetches replay job status/results.
   - `DELETE /admin/replay-dlq/{job_id}` cancels queued replay jobs.
+- ConnectRPC admin surface:
+  - `/tap.v1.TapAdminService/ListReplayJobs`
+  - `/tap.v1.TapAdminService/EnqueueReplayJob`
+  - `/tap.v1.TapAdminService/GetReplayJob`
+  - `/tap.v1.TapAdminService/CancelReplayJob`
+  - `/tap.v1.TapAdminService/GetPollerStatus`
 - Admin poller runtime status endpoint: `GET /admin/poller-status` guarded by `X-Admin-Token`, with optional `provider` and `tenant` filters.
 - Health and observability endpoints:
   - `GET /livez`
@@ -78,6 +84,7 @@ Run smoke test only (for an existing install):
 
 ```bash
 go test ./...
+make proto
 go run ./cmd/tap -config ./config.yaml
 go run ./cmd/tap -config ./config.yaml -check-config
 ./scripts/lint-config.sh
@@ -180,6 +187,10 @@ When any admin token is configured (`server.admin_token`, `server.admin_token_se
 ## Admin API Contract
 
 - OpenAPI contract: `docs/admin-openapi.yaml`
+- Connect proto contract: `proto/tap/v1/admin.proto`
+- Connect admin auth still uses `X-Admin-Token` and optional transport headers such as `X-Request-ID`, `X-Forwarded-For`, and the configured client-cert header.
+- `EnqueueReplayJob` exposes `idempotency_key` and `admin_reason` as request fields instead of custom headers, while preserving the same underlying replay job semantics and guardrails.
+- `CancelReplayJob` exposes `admin_reason` as a request field for the same reason.
 
 ```bash
 # Replay DLQ with explicit request id

@@ -37,6 +37,7 @@ func registerAdminRoutes(mux *http.ServeMux, deps adminRouteDeps) (closer, error
 	if !adminEndpointsEnabled(deps.cfg.Server) {
 		return nil, nil
 	}
+	adminMux := http.NewServeMux()
 
 	logger := deps.logger
 	if logger == nil {
@@ -205,7 +206,7 @@ func registerAdminRoutes(mux *http.ServeMux, deps adminRouteDeps) (closer, error
 		}, true
 	}
 
-	mux.HandleFunc("GET /admin/replay-dlq", func(w http.ResponseWriter, r *http.Request) {
+	adminMux.HandleFunc("GET /admin/replay-dlq", func(w http.ResponseWriter, r *http.Request) {
 		access, ok := requireAdminAccess(adminEndpointReplayDLQList, adminScopeRead, w, r)
 		if !ok {
 			return
@@ -296,7 +297,7 @@ func registerAdminRoutes(mux *http.ServeMux, deps adminRouteDeps) (closer, error
 		)
 	})
 
-	mux.HandleFunc("POST /admin/replay-dlq", func(w http.ResponseWriter, r *http.Request) {
+	adminMux.HandleFunc("POST /admin/replay-dlq", func(w http.ResponseWriter, r *http.Request) {
 		access, ok := requireAdminAccess(adminEndpointReplayDLQ, adminScopeReplay, w, r)
 		if !ok {
 			return
@@ -506,7 +507,7 @@ func registerAdminRoutes(mux *http.ServeMux, deps adminRouteDeps) (closer, error
 			"duration_ms", time.Since(startedAt).Milliseconds(),
 		)
 	})
-	mux.HandleFunc("GET /admin/replay-dlq/{job_id}", func(w http.ResponseWriter, r *http.Request) {
+	adminMux.HandleFunc("GET /admin/replay-dlq/{job_id}", func(w http.ResponseWriter, r *http.Request) {
 		access, ok := requireAdminAccess(adminEndpointReplayStatus, adminScopeRead, w, r)
 		if !ok {
 			return
@@ -554,7 +555,7 @@ func registerAdminRoutes(mux *http.ServeMux, deps adminRouteDeps) (closer, error
 			"duration_ms", time.Since(startedAt).Milliseconds(),
 		)
 	})
-	mux.HandleFunc("DELETE /admin/replay-dlq/{job_id}", func(w http.ResponseWriter, r *http.Request) {
+	adminMux.HandleFunc("DELETE /admin/replay-dlq/{job_id}", func(w http.ResponseWriter, r *http.Request) {
 		access, ok := requireAdminAccess(adminEndpointReplayCancel, adminScopeCancel, w, r)
 		if !ok {
 			return
@@ -630,7 +631,7 @@ func registerAdminRoutes(mux *http.ServeMux, deps adminRouteDeps) (closer, error
 			"duration_ms", time.Since(startedAt).Milliseconds(),
 		)
 	})
-	mux.HandleFunc("GET /admin/poller-status", func(w http.ResponseWriter, r *http.Request) {
+	adminMux.HandleFunc("GET /admin/poller-status", func(w http.ResponseWriter, r *http.Request) {
 		access, ok := requireAdminAccess(adminEndpointPollerStatus, adminScopeRead, w, r)
 		if !ok {
 			return
@@ -663,6 +664,10 @@ func registerAdminRoutes(mux *http.ServeMux, deps adminRouteDeps) (closer, error
 			"duration_ms", time.Since(startedAt).Milliseconds(),
 		)
 	})
+
+	connectPath, connectHandler := newTapAdminConnectHandler(adminMux)
+	mux.Handle(connectPath, connectHandler)
+	mux.Handle("/admin/", adminMux)
 
 	return replayJobs, nil
 }
