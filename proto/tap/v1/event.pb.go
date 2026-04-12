@@ -357,6 +357,7 @@ var (
 
 func file_proto_tap_v1_event_proto_rawDescGZIP() []byte {
 	file_proto_tap_v1_event_proto_rawDescOnce.Do(func() {
+		// #nosec G103 -- generated protobuf descriptor code uses unsafe internally.
 		file_proto_tap_v1_event_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_tap_v1_event_proto_rawDesc), len(file_proto_tap_v1_event_proto_rawDesc)))
 	})
 	return file_proto_tap_v1_event_proto_rawDescData
@@ -399,6 +400,7 @@ func file_proto_tap_v1_event_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
+			// #nosec G103 -- generated protobuf descriptor code uses unsafe internally.
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_tap_v1_event_proto_rawDesc), len(file_proto_tap_v1_event_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   5,
