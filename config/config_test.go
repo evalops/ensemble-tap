@@ -238,8 +238,8 @@ func TestLoadConfigResolvesVaultReferencesWithKubernetesAuth(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.URL.Path == "/v1/auth/kubernetes/login":
+		switch r.URL.Path {
+		case "/v1/auth/kubernetes/login":
 			loginCalls.Add(1)
 			var payload map[string]string
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -258,7 +258,7 @@ func TestLoadConfigResolvesVaultReferencesWithKubernetesAuth(t *testing.T) {
 					"client_token": "vault-runtime-token",
 				},
 			})
-		case r.URL.Path == "/v1/secret/data/homelab/siphon/runtime":
+		case "/v1/secret/data/homelab/siphon/runtime":
 			readCalls.Add(1)
 			if got := r.Header.Get("X-Vault-Token"); got != "vault-runtime-token" {
 				t.Errorf("unexpected vault token header: %q", got)
@@ -875,7 +875,7 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:                "nats://localhost:4222",
 					Stream:             "SIPHON",
-					SubjectPrefix: "siphon.tap",
+					SubjectPrefix:      "siphon.tap",
 					InsecureSkipVerify: true,
 				},
 			},
@@ -900,7 +900,7 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:              "nats://localhost:4222",
 					Stream:           "SIPHON",
-					SubjectPrefix: "siphon.tap",
+					SubjectPrefix:    "siphon.tap",
 					StreamMaxMsgSize: 2147483648,
 				},
 			},
@@ -1108,7 +1108,7 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:                 "nats://localhost:4222",
 					Stream:              "SIPHON",
-					SubjectPrefix: "siphon.tap",
+					SubjectPrefix:       "siphon.tap",
 					MaxAge:              24 * time.Hour,
 					DedupWindow:         time.Minute,
 					ConnectTimeout:      5 * time.Second,
@@ -1310,7 +1310,7 @@ func TestConfigValidateAdvancedNATSAndClickHouseControls(t *testing.T) {
 			NATS: NATSConfig{
 				URL:                 "nats://localhost:4222",
 				Stream:              "SIPHON",
-				SubjectPrefix: "siphon.tap",
+				SubjectPrefix:       "siphon.tap",
 				MaxAge:              24 * time.Hour,
 				DedupWindow:         time.Minute,
 				ConnectTimeout:      5 * time.Second,

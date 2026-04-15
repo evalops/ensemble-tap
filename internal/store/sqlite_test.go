@@ -37,7 +37,9 @@ func TestSQLiteStateStoreCheckpointAndSnapshotPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen sqlite store: %v", err)
 	}
-	defer reopen.Close()
+	defer func() {
+		_ = reopen.Close()
+	}()
 
 	cp2, ok := reopen.Checkpoints.Get("hubspot")
 	if !ok || cp2 != "cp_1" {

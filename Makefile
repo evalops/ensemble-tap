@@ -2,10 +2,12 @@ GO ?= go
 MIN_COVERAGE ?= 75
 STATICCHECK_VERSION ?= v0.6.1
 STATICCHECK_BIN := $(shell $(GO) env GOPATH)/bin/staticcheck
+GOLANGCI_LINT_VERSION ?= v2.11.3
+GOLANGCI_LINT_BIN := $(shell $(GO) env GOPATH)/bin/golangci-lint
 
-.PHONY: ci-local test race vet staticcheck staticcheck-install coverage openapi proto config-lint chart-assert helm-lint helm-template onboard onboard-smoke setup-hooks install-hooks proto-check
+.PHONY: ci-local test race vet lint lint-install staticcheck staticcheck-install coverage openapi proto proto-lint config-lint chart-assert helm-lint helm-template onboard onboard-smoke setup-hooks install-hooks proto-check
 
-ci-local: vet test race staticcheck coverage openapi config-lint chart-assert helm-lint helm-template
+ci-local: vet test race lint staticcheck coverage openapi proto-lint config-lint chart-assert helm-lint helm-template
 
 test:
 	$(GO) test ./...
@@ -15,6 +17,12 @@ race:
 
 vet:
 	$(GO) vet ./...
+
+lint-install:
+	GOTOOLCHAIN=go1.26.2 $(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+
+lint: lint-install
+	GOTOOLCHAIN=go1.26.2 $(GOLANGCI_LINT_BIN) run ./...
 
 staticcheck-install:
 	GOTOOLCHAIN=go1.26.2 $(GO) install honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
@@ -38,6 +46,9 @@ openapi:
 
 proto:
 	buf generate
+
+proto-lint:
+	buf lint
 
 proto-check: proto
 	@if git diff --quiet -- 'proto/**/*.pb.go' 'proto/**/*connect.go'; then \

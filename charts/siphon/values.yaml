@@ -37,6 +37,13 @@ service:
   type: ClusterIP
   port: 8080
 
+startupProbe:
+  enabled: true
+  path: /livez
+  failureThreshold: 30
+  periodSeconds: 5
+  timeoutSeconds: 1
+
 ingress:
   enabled: false
   className: ""

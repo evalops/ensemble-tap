@@ -101,7 +101,9 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return err
 	}
 	if storesCloser != nil {
-		defer storesCloser.Close()
+		defer func() {
+			_ = storesCloser.Close()
+		}()
 	}
 
 	dlqPublisher, err := dlq.NewPublisher(ctx, cfg.NATS, publisher.JetStream())
@@ -140,7 +142,9 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return err
 	}
 	if adminCloser != nil {
-		defer adminCloser.Close()
+		defer func() {
+			_ = adminCloser.Close()
+		}()
 	}
 
 	httpServer := ingressServer.HTTPServer(mux)

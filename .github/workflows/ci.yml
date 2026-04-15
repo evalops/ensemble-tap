@@ -17,11 +17,27 @@ env:
   GOTOOLCHAIN: go1.26.2
   TOOLS_BIN: ${{ github.workspace }}/.cache/tools/bin
   DISABLE_TOOL_CACHE: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
+  GOLANGCI_LINT_VERSION: v2.11.3
   STATICCHECK_VERSION: v0.6.1
   GOSEC_VERSION: v2.23.0
   GOVULNCHECK_VERSION: v1.1.4
 
 jobs:
+  proto-lint:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Buf
+        uses: bufbuild/buf-action@v1
+        with:
+          setup_only: true
+
+      - name: Run buf lint
+        run: buf lint
+
   test:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
@@ -37,6 +53,9 @@ jobs:
 
       - name: Vet
         run: go vet ./...
+
+      - name: Race tests
+        run: go test ./... -race -count=1
 
       - name: Coverage
         env:
@@ -59,6 +78,25 @@ jobs:
         with:
           name: coverage-profile
           path: coverage.out
+
+  golangci-lint:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: evalops/service-runtime/.github/actions/setup-go-service@d348819979602be3a2b8349b5dccd41488bb7cd2
+        with:
+          go-version: "1.26.2"
+          download: "false"
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          args: --timeout=5m ./...
 
   staticcheck:
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -461,7 +499,9 @@ jobs:
   create-failure-issue:
     if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(needs.*.result, 'failure') }}
     needs:
+      - proto-lint
       - test
+      - golangci-lint
       - staticcheck
       - openapi-contract
       - config-lint

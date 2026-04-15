@@ -1,0 +1,35 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+    reviewers:
+      - evalops/engineering
+    commit-message:
+      prefix: "chore(deps):"
+    groups:
+      evalops-internal:
+        patterns:
+          - "github.com/evalops/*"
+        update-types:
+          - minor
+          - patch
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels:
+      - ci
+    commit-message:
+      prefix: "chore(ci):"
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+    labels:
+      - infrastructure
+    commit-message:
+      prefix: "chore(docker):"

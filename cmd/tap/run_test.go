@@ -1944,7 +1944,9 @@ func fetchMetricsBody(t *testing.T, url string) string {
 	if err != nil {
 		t.Fatalf("fetch metrics: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected metrics status 200, got %d", resp.StatusCode)
 	}
@@ -2069,7 +2071,9 @@ func freePort(t *testing.T) int {
 	if err != nil {
 		t.Fatalf("allocate port: %v", err)
 	}
-	defer ln.Close()
+	defer func() {
+		_ = ln.Close()
+	}()
 	return ln.Addr().(*net.TCPAddr).Port
 }
 

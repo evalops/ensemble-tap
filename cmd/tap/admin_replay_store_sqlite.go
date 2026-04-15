@@ -176,7 +176,9 @@ FROM admin_replay_jobs`)
 	if err != nil {
 		return nil, fmt.Errorf("query admin replay jobs: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	out := make([]*adminReplayJob, 0)
 	for rows.Next() {

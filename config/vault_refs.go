@@ -274,12 +274,16 @@ func readFileWithinRoot(rawPath string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open path root %q: %w", rootPath, err)
 	}
-	defer root.Close()
+	defer func() {
+		_ = root.Close()
+	}()
 
 	file, err := root.Open(fileName)
 	if err != nil {
 		return nil, fmt.Errorf("open file %q: %w", path, err)
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 	return io.ReadAll(file)
 }

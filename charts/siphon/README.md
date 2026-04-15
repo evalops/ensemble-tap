@@ -189,6 +189,7 @@ Auth notes:
 ## Ops hardening defaults
 
 - `podDisruptionBudget.enabled=true` with `minAvailable=1`.
+- `startupProbe.enabled=true` on `/livez` to protect cold starts before liveness enforcement begins.
 - `serviceAccount.automount=false` to avoid mounting API tokens unless explicitly needed.
 - `networkPolicy.enabled=true` with explicit ingress/egress policy stanzas (DNS + HTTPS defaults).
 - `networkPolicy.allowConfigPorts=true` auto-derives NATS/ClickHouse TCP egress ports from `config.nats.url` and `config.clickhouse.addr`.

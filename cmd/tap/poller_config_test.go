@@ -76,7 +76,9 @@ func TestOpenPollStores(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite stores: %v", err)
 	}
-	defer closer2.Close()
+	defer func() {
+		_ = closer2.Close()
+	}()
 	if err := cp2.Set("hubspot", "cp2"); err != nil {
 		t.Fatalf("set sqlite checkpoint: %v", err)
 	}

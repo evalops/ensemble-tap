@@ -28,9 +28,9 @@ func (h GitHubHandler) Handle(r *http.Request, _ []byte, cfg cfgpkg.ProviderConf
 		return WebhookEvent{}, fmt.Errorf("missing X-GitHub-Event header")
 	}
 
-	if _, err := gh.ParseWebHook(eventType, payload); err != nil {
-		// We still process unknown payloads as generic GitHub events.
-	}
+	// Parse the payload when GitHub exposes a typed event, but still allow
+	// generic normalization for unknown event shapes.
+	_, _ = gh.ParseWebHook(eventType, payload)
 
 	deliveryID := r.Header.Get("X-GitHub-Delivery")
 	normEvt, err := norm.NormalizeGitHub(eventType, deliveryID, cfg.TenantID, payload)
