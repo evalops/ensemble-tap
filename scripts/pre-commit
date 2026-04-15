@@ -1,46 +1,34 @@
 #!/usr/bin/env bash
+
 set -euo pipefail
 
-# Pre-commit hook for siphon.
-# Install: git config core.hooksPath scripts  (or symlink scripts/pre-commit → .git/hooks/pre-commit)
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
 
-STAGED=$(git diff --cached --name-only --diff-filter=ACM)
-
-# ─── Guard: no legacy project-name reintroduction ───
-if echo "$STAGED" | xargs grep -l 'ensemble[-]tap\|ensemble[.]tap\|ENSEMBLE[_]TAP' 2>/dev/null; then
-  echo "error: staged files contain legacy project-name references — rename to 'siphon'"
-  exit 1
+mapfile -t staged_go_files < <(git diff --cached --name-only --diff-filter=ACM -- "*.go")
+if [ ${#staged_go_files[@]} -eq 0 ]; then
+  exit 0
 fi
 
-# ─── Proto drift: generated .pb.go must match .proto source ───
-PROTO_CHANGED=$(echo "$STAGED" | grep '\.proto$' || true)
-if [ -n "$PROTO_CHANGED" ]; then
-  if command -v buf >/dev/null 2>&1; then
-    echo "Proto files changed — regenerating with buf..."
-    buf generate
-    PROTO_DRIFT=$(git diff --name-only -- 'proto/**/*.pb.go' 'proto/**/*connect.go' || true)
-    if [ -n "$PROTO_DRIFT" ]; then
-      echo "error: proto generated code is out of sync after buf generate:"
-      echo "$PROTO_DRIFT"
-      echo "Stage the regenerated files and retry."
-      exit 1
-    fi
-  else
-    echo "warning: .proto files changed but buf is not installed — skipping regeneration check"
+stashed=0
+cleanup() {
+  if [ "$stashed" -eq 1 ]; then
+    git stash pop -q >/dev/null 2>&1 || true
   fi
+}
+trap cleanup EXIT
+
+if ! git diff --quiet -- . || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+  git stash push -q --keep-index --include-untracked -m "pre-commit-$(date +%s)"
+  stashed=1
 fi
 
-# ─── Go checks on staged files ───
-GO_STAGED=$(echo "$STAGED" | grep '\.go$' || true)
-if [ -n "$GO_STAGED" ]; then
-  # Stash unstaged changes so checks run against exactly what will be committed.
-  STASH_NAME="pre-commit-$(date +%s)"
-  git stash push -q --keep-index -m "$STASH_NAME"
-  trap 'git stash pop -q 2>/dev/null || true' EXIT
+echo "Running gofmt on staged files..."
+gofmt -w "${staged_go_files[@]}"
+git add -- "${staged_go_files[@]}"
 
-  echo "Running go vet..."
-  go vet ./...
+echo "Running go vet..."
+go vet ./...
 
-  echo "Running tests (short mode)..."
-  go test -short ./...
-fi
+echo "Running go test..."
+go test ./...

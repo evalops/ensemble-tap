@@ -3,7 +3,7 @@ MIN_COVERAGE ?= 75
 STATICCHECK_VERSION ?= v0.6.1
 STATICCHECK_BIN := $(shell $(GO) env GOPATH)/bin/staticcheck
 
-.PHONY: ci-local test race vet staticcheck staticcheck-install coverage openapi proto config-lint chart-assert helm-lint helm-template onboard onboard-smoke setup-hooks proto-check
+.PHONY: ci-local test race vet staticcheck staticcheck-install coverage openapi proto config-lint chart-assert helm-lint helm-template onboard onboard-smoke setup-hooks install-hooks proto-check
 
 ci-local: vet test race staticcheck coverage openapi config-lint chart-assert helm-lint helm-template
 
@@ -51,6 +51,8 @@ proto-check: proto
 setup-hooks:
 	git config core.hooksPath scripts
 	@echo "ok: git hooks configured to use scripts/"
+
+install-hooks: setup-hooks
 
 config-lint:
 	./scripts/lint-config.sh
