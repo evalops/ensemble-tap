@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net/http"
 
-	cfgpkg "github.com/evalops/ensemble-tap/config"
-	norm "github.com/evalops/ensemble-tap/internal/normalize/providers"
+	cfgpkg "github.com/evalops/siphon/config"
+	norm "github.com/evalops/siphon/internal/normalize/providers"
 	"github.com/stripe/stripe-go/v82/webhook"
 )
 

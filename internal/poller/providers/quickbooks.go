@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/evalops/ensemble-tap/internal/poller"
+	"github.com/evalops/siphon/internal/poller"
 )
 
 type QuickBooksFetcher struct {

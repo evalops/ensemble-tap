@@ -12,17 +12,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/evalops/ensemble-tap/config"
-	"github.com/evalops/ensemble-tap/internal/ingress"
+	"github.com/evalops/siphon/config"
+	"github.com/evalops/siphon/internal/ingress"
 )
 
 func TestWebhookToNATSToClickHousePipeline(t *testing.T) {
 	s := runNATSServer(t)
-	streamName := "ENSEMBLE_TAP_BLACKBOX"
+	streamName := "SIPHON_BLACKBOX"
 	natsCfg := config.NATSConfig{
 		URL:           s.ClientURL(),
 		Stream:        streamName,
-		SubjectPrefix: "ensemble.tap",
+		SubjectPrefix: "siphon",
 		MaxAge:        time.Hour,
 		DedupWindow:   2 * time.Minute,
 	}

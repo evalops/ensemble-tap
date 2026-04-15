@@ -10,7 +10,7 @@ on:
       release_name:
         description: Helm release name for smoke install
         required: false
-        default: ensemble-tap
+        default: siphon
       namespace:
         description: Kubernetes namespace for smoke install
         required: false
@@ -21,7 +21,7 @@ permissions:
 
 env:
   GOTOOLCHAIN: go1.26.2
-  TAP_IMAGE_REPO: ensemble-tap
+  TAP_IMAGE_REPO: siphon
   NATS_IMAGE: nats:2.12.4-alpine
 
 jobs:
@@ -113,11 +113,11 @@ jobs:
           MANIFEST
           kubectl -n "${{ inputs.namespace }}" rollout status deployment/nats --timeout=120s
 
-      - name: Deploy ensemble-tap Helm release
+      - name: Deploy siphon Helm release
         env:
           ONBOARDING_SECRET: rc-generic-secret
         run: |
-          helm upgrade --install "${{ inputs.release_name }}" ./charts/ensemble-tap \
+          helm upgrade --install "${{ inputs.release_name }}" ./charts/siphon \
             --namespace "${{ inputs.namespace }}" \
             --set image.repository="${TAP_IMAGE_REPO}" \
             --set image.tag="${IMAGE_TAG}" \

@@ -10,7 +10,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/evalops/ensemble-tap/config"
+	"github.com/evalops/siphon/config"
 )
 
 func main() {
@@ -40,7 +40,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	logger.Info("ensemble-tap stopped")
+	logger.Info("siphon stopped")
 	fmt.Println("shutdown complete")
 }
 

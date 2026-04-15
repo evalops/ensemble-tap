@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/evalops/ensemble-tap/config"
+	"github.com/evalops/siphon/config"
 	"github.com/stripe/stripe-go/v82/webhook"
 )
 

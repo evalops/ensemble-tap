@@ -1,6 +1,6 @@
 package poller
 
-import "github.com/evalops/ensemble-tap/internal/normalize"
+import "github.com/evalops/siphon/internal/normalize"
 
 func DiffSnapshots(prev, curr map[string]any) map[string]normalize.FieldChange {
 	changes := make(map[string]normalize.FieldChange)

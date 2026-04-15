@@ -2,9 +2,9 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "ensemble-tap.fullname" . }}
+  name: {{ include "siphon.fullname" . }}
   labels:
-    {{- include "ensemble-tap.labels" . | nindent 4 }}
+    {{- include "siphon.labels" . | nindent 4 }}
   {{- with .Values.ingress.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -23,7 +23,7 @@ spec:
             pathType: {{ .pathType }}
             backend:
               service:
-                name: {{ include "ensemble-tap.fullname" $ }}
+                name: {{ include "siphon.fullname" $ }}
                 port:
                   number: {{ $.Values.service.port }}
           {{- end }}

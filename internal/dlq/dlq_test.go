@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/evalops/ensemble-tap/config"
+	"github.com/evalops/siphon/config"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 )
@@ -22,7 +22,7 @@ func TestDLQRecordAndReplay(t *testing.T) {
 		t.Fatalf("jetstream: %v", err)
 	}
 
-	cfg := config.NATSConfig{Stream: "ENSEMBLE_TAP", SubjectPrefix: "ensemble.tap"}
+	cfg := config.NATSConfig{Stream: "SIPHON", SubjectPrefix: "siphon"}
 	p, err := NewPublisher(context.Background(), cfg, js)
 	if err != nil {
 		t.Fatalf("new dlq publisher: %v", err)
@@ -33,7 +33,7 @@ func TestDLQRecordAndReplay(t *testing.T) {
 		Provider:        "hubspot",
 		RequestID:       "req-dlq-1",
 		Reason:          "nats timeout",
-		OriginalSubject: "ensemble.tap.hubspot.deal.updated",
+		OriginalSubject: "siphon.hubspot.deal.updated",
 		OriginalPayload: []byte(`{"id":"evt_1"}`),
 		OriginalDedupID: "evt_1",
 	}
@@ -72,7 +72,7 @@ func TestDLQPending(t *testing.T) {
 		t.Fatalf("jetstream: %v", err)
 	}
 
-	cfg := config.NATSConfig{Stream: "ENSEMBLE_TAP_PENDING", SubjectPrefix: "ensemble.tap"}
+	cfg := config.NATSConfig{Stream: "SIPHON_PENDING", SubjectPrefix: "siphon"}
 	p, err := NewPublisher(context.Background(), cfg, js)
 	if err != nil {
 		t.Fatalf("new dlq publisher: %v", err)
@@ -82,7 +82,7 @@ func TestDLQPending(t *testing.T) {
 		Stage:           "publish",
 		Provider:        "stripe",
 		Reason:          "forced test",
-		OriginalSubject: "ensemble.tap.stripe.invoice.updated",
+		OriginalSubject: "siphon.stripe.invoice.updated",
 		OriginalPayload: []byte(`{"id":"evt_pending_1"}`),
 		OriginalDedupID: "evt_pending_1",
 	}

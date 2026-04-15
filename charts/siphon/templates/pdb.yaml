@@ -2,13 +2,13 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: {{ include "ensemble-tap.fullname" . }}
+  name: {{ include "siphon.fullname" . }}
   labels:
-    {{- include "ensemble-tap.labels" . | nindent 4 }}
+    {{- include "siphon.labels" . | nindent 4 }}
 spec:
   selector:
     matchLabels:
-      {{- include "ensemble-tap.selectorLabels" . | nindent 6 }}
+      {{- include "siphon.selectorLabels" . | nindent 6 }}
   {{- if .Values.podDisruptionBudget.maxUnavailable }}
   maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
   {{- else }}

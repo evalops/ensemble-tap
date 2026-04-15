@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/evalops/ensemble-tap/config"
+	"github.com/evalops/siphon/config"
 	"github.com/nats-io/nats.go"
 )
 

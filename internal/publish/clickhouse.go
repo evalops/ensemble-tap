@@ -17,10 +17,10 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 	cloudevents "github.com/cloudevents/sdk-go/v2"
-	"github.com/evalops/ensemble-tap/config"
-	"github.com/evalops/ensemble-tap/internal/backoff"
-	"github.com/evalops/ensemble-tap/internal/health"
-	"github.com/evalops/ensemble-tap/internal/normalize"
+	"github.com/evalops/siphon/config"
+	"github.com/evalops/siphon/internal/backoff"
+	"github.com/evalops/siphon/internal/health"
+	"github.com/evalops/siphon/internal/normalize"
 	"github.com/nats-io/nats.go"
 )
 

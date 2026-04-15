@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/evalops/ensemble-tap/config"
-	"github.com/evalops/ensemble-tap/internal/normalize"
+	"github.com/evalops/siphon/config"
+	"github.com/evalops/siphon/internal/normalize"
 )
 
 type WebhookEvent struct {

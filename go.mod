@@ -1,4 +1,4 @@
-module github.com/evalops/ensemble-tap
+module github.com/evalops/siphon
 
 go 1.25.0
 

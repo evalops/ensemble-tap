@@ -348,7 +348,7 @@ const file_tap_v1_event_proto_rawDesc = "" +
 	" \x01(\v2\x17.google.protobuf.StructR\bsnapshot\x1aO\n" +
 	"\fChangesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12)\n" +
-	"\x05value\x18\x02 \x01(\v2\x13.tap.v1.FieldChangeR\x05value:\x028\x01B4Z2github.com/evalops/ensemble-tap/proto/tap/v1;tapv1b\x06proto3"
+	"\x05value\x18\x02 \x01(\v2\x13.tap.v1.FieldChangeR\x05value:\x028\x01B4Z2github.com/evalops/siphon/proto/tap/v1;tapv1b\x06proto3"
 
 var (
 	file_tap_v1_event_proto_rawDescOnce sync.Once

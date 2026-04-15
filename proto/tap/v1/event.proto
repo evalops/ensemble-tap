@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package tap.v1;
 
-option go_package = "github.com/evalops/ensemble-tap/proto/tap/v1;tapv1";
+option go_package = "github.com/evalops/siphon/proto/tap/v1;tapv1";
 
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";

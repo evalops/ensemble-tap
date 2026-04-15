@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/evalops/ensemble-tap/config"
-	tapv1 "github.com/evalops/ensemble-tap/proto/tap/v1"
-	"github.com/evalops/ensemble-tap/proto/tap/v1/tapv1connect"
+	"github.com/evalops/siphon/config"
+	tapv1 "github.com/evalops/siphon/proto/tap/v1"
+	"github.com/evalops/siphon/proto/tap/v1/tapv1connect"
 )
 
 func TestTapAdminConnectReplayLifecycleAndIdempotency(t *testing.T) {
@@ -20,8 +20,8 @@ func TestTapAdminConnectReplayLifecycleAndIdempotency(t *testing.T) {
 	cfg := config.Config{
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
-			Stream:        "ENSEMBLE_TAP_CMD_TEST_CONNECT_REPLAY",
-			SubjectPrefix: "ensemble.tap",
+			Stream:        "SIPHON_CMD_TEST_CONNECT_REPLAY",
+			SubjectPrefix: "siphon",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},
@@ -133,8 +133,8 @@ func TestTapAdminConnectRoleScopedTokens(t *testing.T) {
 	cfg := config.Config{
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
-			Stream:        "ENSEMBLE_TAP_CMD_TEST_CONNECT_ROLE_SCOPES",
-			SubjectPrefix: "ensemble.tap",
+			Stream:        "SIPHON_CMD_TEST_CONNECT_ROLE_SCOPES",
+			SubjectPrefix: "siphon",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},
@@ -249,8 +249,8 @@ func TestTapAdminConnectPreservesAllowlistAndMTLS(t *testing.T) {
 	cfg := config.Config{
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
-			Stream:        "ENSEMBLE_TAP_CMD_TEST_CONNECT_MTLS",
-			SubjectPrefix: "ensemble.tap",
+			Stream:        "SIPHON_CMD_TEST_CONNECT_MTLS",
+			SubjectPrefix: "siphon",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},

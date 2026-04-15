@@ -1,20 +1,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "ensemble-tap.fullname" . }}
+  name: {{ include "siphon.fullname" . }}
   labels:
-    {{- include "ensemble-tap.labels" . | nindent 4 }}
+    {{- include "siphon.labels" . | nindent 4 }}
 spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
   selector:
     matchLabels:
-      {{- include "ensemble-tap.selectorLabels" . | nindent 6 }}
+      {{- include "siphon.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "ensemble-tap.selectorLabels" . | nindent 8 }}
+        {{- include "siphon.selectorLabels" . | nindent 8 }}
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -29,7 +29,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "ensemble-tap.serviceAccountName" . }}
+      serviceAccountName: {{ include "siphon.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
@@ -96,13 +96,13 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: {{ include "ensemble-tap.fullname" . }}-config
+            name: {{ include "siphon.fullname" . }}-config
         - name: tmp
           emptyDir: {}
         {{- if .Values.persistence.enabled }}
         - name: state
           persistentVolumeClaim:
-            claimName: {{ include "ensemble-tap.fullname" . }}-state
+            claimName: {{ include "siphon.fullname" . }}-state
         {{- else }}
         - name: state
           emptyDir: {}

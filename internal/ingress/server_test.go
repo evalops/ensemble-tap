@@ -16,10 +16,10 @@ import (
 	"testing"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
-	"github.com/evalops/ensemble-tap/config"
-	"github.com/evalops/ensemble-tap/internal/dlq"
-	"github.com/evalops/ensemble-tap/internal/normalize"
-	normproviders "github.com/evalops/ensemble-tap/internal/normalize/providers"
+	"github.com/evalops/siphon/config"
+	"github.com/evalops/siphon/internal/dlq"
+	"github.com/evalops/siphon/internal/normalize"
+	normproviders "github.com/evalops/siphon/internal/normalize/providers"
 )
 
 type fakePublisher struct {
@@ -40,7 +40,7 @@ func (f *fakePublisher) Publish(_ context.Context, event cloudevents.Event, dedu
 	if f.subject != "" {
 		return f.subject, nil
 	}
-	return "ensemble.tap.test.event.updated", nil
+	return "siphon.test.event.updated", nil
 }
 
 type fakeDLQRecorder struct {
@@ -56,7 +56,7 @@ func TestServerAcceptsGenericWebhook(t *testing.T) {
 	secret := "super-secret"
 	body := []byte(`{"id":"invoice_42","timestamp":"2026-03-03T14:22:00Z","amount":1200}`)
 
-	pub := &fakePublisher{subject: "ensemble.tap.acme.invoice.paid"}
+	pub := &fakePublisher{subject: "siphon.acme.invoice.paid"}
 	srv := newTestServer(map[string]config.ProviderConfig{
 		"acme": {Secret: secret, TenantID: "tenant-42"},
 	}, pub)
@@ -87,7 +87,7 @@ func TestServerAcceptsGenericWebhook(t *testing.T) {
 	if resp["status"] != "accepted" {
 		t.Fatalf("unexpected status payload: %#v", resp)
 	}
-	if resp["subject"] != "ensemble.tap.acme.invoice.paid" {
+	if resp["subject"] != "siphon.acme.invoice.paid" {
 		t.Fatalf("unexpected subject payload: %#v", resp)
 	}
 	if resp["id"] != "evt_123" {

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/evalops/ensemble-tap/config"
-	pollproviders "github.com/evalops/ensemble-tap/internal/poller/providers"
+	"github.com/evalops/siphon/config"
+	pollproviders "github.com/evalops/siphon/internal/poller/providers"
 )
 
 func TestModeContainsPoll(t *testing.T) {

@@ -238,10 +238,10 @@ func (c *Config) ApplyDefaults() {
 		c.NATS.URL = "nats://localhost:4222"
 	}
 	if c.NATS.Stream == "" {
-		c.NATS.Stream = "ENSEMBLE_TAP"
+		c.NATS.Stream = "SIPHON"
 	}
 	if c.NATS.SubjectPrefix == "" {
-		c.NATS.SubjectPrefix = "ensemble.tap"
+		c.NATS.SubjectPrefix = "siphon"
 	}
 	if c.NATS.MaxAge == 0 {
 		c.NATS.MaxAge = 7 * 24 * time.Hour

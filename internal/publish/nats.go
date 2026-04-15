@@ -14,10 +14,10 @@ import (
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
-	"github.com/evalops/ensemble-tap/config"
-	"github.com/evalops/ensemble-tap/internal/backoff"
-	"github.com/evalops/ensemble-tap/internal/health"
-	"github.com/evalops/ensemble-tap/internal/normalize"
+	"github.com/evalops/siphon/config"
+	"github.com/evalops/siphon/internal/backoff"
+	"github.com/evalops/siphon/internal/health"
+	"github.com/evalops/siphon/internal/normalize"
 	"github.com/nats-io/nats.go"
 )
 
@@ -47,7 +47,7 @@ const (
 func NewNATSPublisher(ctx context.Context, cfg config.NATSConfig, metrics *health.Metrics) (*NATSPublisher, error) {
 	cfg = normalizeNATSRuntimeConfig(cfg)
 	options := []nats.Option{
-		nats.Name("ensemble-tap"),
+		nats.Name("siphon"),
 		nats.Timeout(cfg.ConnectTimeout),
 		nats.RetryOnFailedConnect(true),
 		nats.MaxReconnects(cfg.MaxReconnects),

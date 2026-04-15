@@ -35,7 +35,7 @@ digest="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 cat >"${fixture_values}" <<EOF
 image:
-  repository: ghcr.io/evalops/ensemble-tap
+  repository: ghcr.io/evalops/siphon
   digest: ${digest}
 serviceAccount:
   automount: false
@@ -60,9 +60,9 @@ config:
     addr: clickhouse-a:9000,clickhouse-b:9440
 EOF
 
-helm template ensemble-tap charts/ensemble-tap >"${rendered_default}"
-helm template ensemble-tap charts/ensemble-tap -f "${fixture_values}" >"${rendered_fixture}"
-helm template ensemble-tap charts/ensemble-tap --set serviceAccount.automount=true >"${rendered_automount}"
+helm template siphon charts/siphon >"${rendered_default}"
+helm template siphon charts/siphon -f "${fixture_values}" >"${rendered_fixture}"
+helm template siphon charts/siphon --set serviceAccount.automount=true >"${rendered_automount}"
 
 default_automount="$(yq -r 'select(.kind == "Deployment") | .spec.template.spec.automountServiceAccountToken' "${rendered_default}")"
 [[ "${default_automount}" == "false" ]] || fail "default automountServiceAccountToken should be false, got ${default_automount}"
@@ -71,7 +71,7 @@ override_automount="$(yq -r 'select(.kind == "Deployment") | .spec.template.spec
 [[ "${override_automount}" == "true" ]] || fail "serviceAccount.automount=true should render true, got ${override_automount}"
 
 rendered_image="$(yq -r 'select(.kind == "Deployment") | .spec.template.spec.containers[] | select(.name == "tap") | .image' "${rendered_fixture}")"
-expected_image="ghcr.io/evalops/ensemble-tap@${digest}"
+expected_image="ghcr.io/evalops/siphon@${digest}"
 [[ "${rendered_image}" == "${expected_image}" ]] || fail "digest image rendering mismatch: got ${rendered_image}, expected ${expected_image}"
 
 ports="$(yq -r 'select(.kind == "NetworkPolicy") | .spec.egress[]?.ports[]?.port' "${rendered_fixture}" | sort -n | uniq | tr '\n' ' ')"

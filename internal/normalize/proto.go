@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
-	tapv1 "github.com/evalops/ensemble-tap/proto/tap/v1"
+	tapv1 "github.com/evalops/siphon/proto/tap/v1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 )

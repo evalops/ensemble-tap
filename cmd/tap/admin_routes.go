@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/evalops/ensemble-tap/config"
-	"github.com/evalops/ensemble-tap/internal/dlq"
-	"github.com/evalops/ensemble-tap/internal/health"
+	"github.com/evalops/siphon/config"
+	"github.com/evalops/siphon/internal/dlq"
+	"github.com/evalops/siphon/internal/health"
 	"golang.org/x/time/rate"
 )
 

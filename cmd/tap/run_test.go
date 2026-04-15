@@ -22,8 +22,8 @@ import (
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 
-	"github.com/evalops/ensemble-tap/config"
-	"github.com/evalops/ensemble-tap/internal/dlq"
+	"github.com/evalops/siphon/config"
+	"github.com/evalops/siphon/internal/dlq"
 )
 
 func TestRunStartsAndStopsWithReadyLifecycle(t *testing.T) {
@@ -35,8 +35,8 @@ func TestRunStartsAndStopsWithReadyLifecycle(t *testing.T) {
 		},
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
-			Stream:        "ENSEMBLE_TAP_CMD_TEST",
-			SubjectPrefix: "ensemble.tap",
+			Stream:        "SIPHON_CMD_TEST",
+			SubjectPrefix: "siphon",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},
@@ -89,8 +89,8 @@ func TestRunReadinessReflectsNATSDisconnect(t *testing.T) {
 	cfg := config.Config{
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
-			Stream:        "ENSEMBLE_TAP_CMD_TEST_READY",
-			SubjectPrefix: "ensemble.tap",
+			Stream:        "SIPHON_CMD_TEST_READY",
+			SubjectPrefix: "siphon",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},
@@ -270,8 +270,8 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 	cfg := config.Config{
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
-			Stream:        "ENSEMBLE_TAP_CMD_TEST_REPLAY",
-			SubjectPrefix: "ensemble.tap",
+			Stream:        "SIPHON_CMD_TEST_REPLAY",
+			SubjectPrefix: "siphon",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},
@@ -378,7 +378,7 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 		t.Fatalf("jetstream context: %v", err)
 	}
 
-	subject := "ensemble.tap.replay.test.updated"
+	subject := "siphon.replay.test.updated"
 	payload := []byte(`{"id":"replay_1"}`)
 	rec := dlq.Record{
 		Stage:           "publish",
@@ -948,8 +948,8 @@ func TestRunAdminPollerStatusEndpoint(t *testing.T) {
 		},
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
-			Stream:        "ENSEMBLE_TAP_CMD_TEST_POLLER_STATUS",
-			SubjectPrefix: "ensemble.tap",
+			Stream:        "SIPHON_CMD_TEST_POLLER_STATUS",
+			SubjectPrefix: "siphon",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},
@@ -1222,8 +1222,8 @@ func TestRunAdminReplayEndpointAllowlistAndMTLS(t *testing.T) {
 	cfg := config.Config{
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
-			Stream:        "ENSEMBLE_TAP_CMD_TEST_ADMIN_MTLS",
-			SubjectPrefix: "ensemble.tap",
+			Stream:        "SIPHON_CMD_TEST_ADMIN_MTLS",
+			SubjectPrefix: "siphon",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},
@@ -1348,8 +1348,8 @@ func TestRunAdminEndpointsRoleScopedTokens(t *testing.T) {
 	cfg := config.Config{
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
-			Stream:        "ENSEMBLE_TAP_CMD_TEST_ADMIN_ROLE_SCOPES",
-			SubjectPrefix: "ensemble.tap",
+			Stream:        "SIPHON_CMD_TEST_ADMIN_ROLE_SCOPES",
+			SubjectPrefix: "siphon",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},
@@ -1537,8 +1537,8 @@ func TestRunAdminReplayUnderContention(t *testing.T) {
 	cfg := config.Config{
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
-			Stream:        "ENSEMBLE_TAP_CMD_TEST_REPLAY_CONTENTION",
-			SubjectPrefix: "ensemble.tap",
+			Stream:        "SIPHON_CMD_TEST_REPLAY_CONTENTION",
+			SubjectPrefix: "siphon",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},
@@ -1581,7 +1581,7 @@ func TestRunAdminReplayUnderContention(t *testing.T) {
 			Stage:           "publish",
 			Provider:        "test",
 			Reason:          "contention replay test",
-			OriginalSubject: "ensemble.tap.replay.contention.updated",
+			OriginalSubject: "siphon.replay.contention.updated",
 			OriginalDedupID: fmt.Sprintf("contention_%d", i),
 			OriginalPayload: []byte(fmt.Sprintf(`{"id":"contention_%d"}`, i)),
 		}
@@ -1712,8 +1712,8 @@ func TestRunAdminEndpointsRateLimited(t *testing.T) {
 	cfg := config.Config{
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
-			Stream:        "ENSEMBLE_TAP_CMD_TEST_ADMIN_RATELIMIT",
-			SubjectPrefix: "ensemble.tap",
+			Stream:        "SIPHON_CMD_TEST_ADMIN_RATELIMIT",
+			SubjectPrefix: "siphon",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},

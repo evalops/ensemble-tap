@@ -42,7 +42,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-helm template ensemble-tap charts/ensemble-tap > "${rendered_manifest}"
+helm template siphon charts/siphon > "${rendered_manifest}"
 
 yq -r '
   select(.kind == "ConfigMap" and (.data."config.yaml" // "") != "")

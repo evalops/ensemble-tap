@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/evalops/ensemble-tap/internal/poller"
+	"github.com/evalops/siphon/internal/poller"
 )
 
 func TestDoAuthenticatedRequestRefreshesToken(t *testing.T) {

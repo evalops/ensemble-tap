@@ -3,7 +3,7 @@ package normalize
 import (
 	"testing"
 
-	tapv1 "github.com/evalops/ensemble-tap/proto/tap/v1"
+	tapv1 "github.com/evalops/siphon/proto/tap/v1"
 )
 
 func TestTapEventDataFromProtoPreservesNilChanges(t *testing.T) {

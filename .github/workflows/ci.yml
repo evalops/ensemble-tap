@@ -153,7 +153,7 @@ jobs:
         uses: evalops/service-runtime/.github/actions/build-docker-image@d348819979602be3a2b8349b5dccd41488bb7cd2
         with:
           dockerfile: ./Dockerfile
-          tags: ensemble-tap:ci
+          tags: siphon:ci
 
   helm-lint:
     runs-on: ubuntu-latest
@@ -165,10 +165,10 @@ jobs:
         uses: azure/setup-helm@v4
 
       - name: Lint Chart
-        run: helm lint charts/ensemble-tap
+        run: helm lint charts/siphon
 
       - name: Render Chart
-        run: helm template ensemble-tap charts/ensemble-tap >/dev/null
+        run: helm template siphon charts/siphon >/dev/null
 
   security-gosec:
     runs-on: ubuntu-latest
@@ -242,8 +242,8 @@ jobs:
 
       - name: Run govulncheck
         run: |
-          GOTOOLCHAIN="${GOTOOLCHAIN}" go build -o ./bin/ensemble-tap ./cmd/tap
-          "${TOOLS_BIN}/govulncheck" -mode=binary ./bin/ensemble-tap
+          GOTOOLCHAIN="${GOTOOLCHAIN}" go build -o ./bin/siphon ./cmd/tap
+          "${TOOLS_BIN}/govulncheck" -mode=binary ./bin/siphon
 
   security-trivy:
     runs-on: ubuntu-latest
@@ -318,11 +318,11 @@ jobs:
           exit 1
 
       - name: Build tap
-        run: go build -o ./bin/ensemble-tap ./cmd/tap
+        run: go build -o ./bin/siphon ./cmd/tap
 
       - name: Start tap
         run: |
-          ./bin/ensemble-tap -config .github/perf/config.yaml > /tmp/tap.log 2>&1 &
+          ./bin/siphon -config .github/perf/config.yaml > /tmp/tap.log 2>&1 &
           echo $! > /tmp/tap.pid
 
       - name: Wait for readiness

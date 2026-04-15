@@ -23,7 +23,7 @@ func TestToCloudEvent(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if evt.Type() != "ensemble.tap.hubspot.deal.updated" {
+	if evt.Type() != "siphon.hubspot.deal.updated" {
 		t.Fatalf("unexpected type: %s", evt.Type())
 	}
 	if evt.Source() != "tap/hubspot/workspace-123" {

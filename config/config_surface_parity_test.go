@@ -25,28 +25,28 @@ func TestConfigSurfaceParity(t *testing.T) {
 	flattenYAMLKeys(exampleRoot, "", exampleKeys)
 	exampleCore := filterKeysByPrefixes(exampleKeys, "nats.", "clickhouse.", "vault.", "server.", "state.")
 
-	valuesRoot := mustReadYAML(t, filepath.Join(root, "charts/ensemble-tap/values.yaml"))
+	valuesRoot := mustReadYAML(t, filepath.Join(root, "charts/siphon/values.yaml"))
 	configSectionRaw, ok := valuesRoot["config"]
 	if !ok {
-		t.Fatalf("charts/ensemble-tap/values.yaml is missing top-level config")
+		t.Fatalf("charts/siphon/values.yaml is missing top-level config")
 	}
 	configSection, ok := configSectionRaw.(map[string]any)
 	if !ok {
-		t.Fatalf("charts/ensemble-tap/values.yaml config section has unexpected type %T", configSectionRaw)
+		t.Fatalf("charts/siphon/values.yaml config section has unexpected type %T", configSectionRaw)
 	}
 	valuesKeys := map[string]struct{}{}
 	flattenYAMLKeys(configSection, "", valuesKeys)
 	valuesCore := filterKeysByPrefixes(valuesKeys, "nats.", "clickhouse.", "vault.", "server.", "state.")
 
-	schemaDoc := mustReadJSON(t, filepath.Join(root, "charts/ensemble-tap/values.schema.json"))
+	schemaDoc := mustReadJSON(t, filepath.Join(root, "charts/siphon/values.schema.json"))
 	schemaConfig := mustNestedMap(t, schemaDoc, "properties", "config")
 	schemaKeys := map[string]struct{}{}
 	flattenSchemaKeys(schemaConfig, "", schemaKeys)
 	schemaCore := filterKeysByPrefixes(schemaKeys, "nats.", "clickhouse.", "vault.", "server.", "state.")
 
 	assertKeySetsEqual(t, "config.example.yaml core config keys", runtimeCore, exampleCore)
-	assertKeySetsEqual(t, "charts/ensemble-tap/values.yaml config core keys", runtimeCore, valuesCore)
-	assertKeySetsEqual(t, "charts/ensemble-tap/values.schema.json config core keys", runtimeCore, schemaCore)
+	assertKeySetsEqual(t, "charts/siphon/values.yaml config core keys", runtimeCore, valuesCore)
+	assertKeySetsEqual(t, "charts/siphon/values.schema.json config core keys", runtimeCore, schemaCore)
 }
 
 func repoRootFromTestFile(t *testing.T) string {

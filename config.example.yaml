@@ -109,8 +109,8 @@ providers:
 
 nats:
   url: nats://localhost:4222
-  stream: ENSEMBLE_TAP
-  subject_prefix: ensemble.tap
+  stream: SIPHON
+  subject_prefix: siphon
   tenant_scoped_subjects: false
   max_age: 168h
   dedup_window: 2m
@@ -182,7 +182,7 @@ vault:
   token: ${VAULT_TOKEN}
   token_file: ""
   # Used when auth_method=kubernetes.
-  kubernetes_role: ensemble-tap-runtime
+  kubernetes_role: siphon-runtime
   kubernetes_mount_path: kubernetes
   kubernetes_jwt_file: /var/run/secrets/kubernetes.io/serviceaccount/token
 

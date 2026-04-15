@@ -64,8 +64,8 @@ jobs:
 
       - name: Package chart
         run: |
-          helm lint charts/ensemble-tap
-          helm package charts/ensemble-tap --destination dist
+          helm lint charts/siphon
+          helm package charts/siphon --destination dist
 
       - name: Generate checksums
         run: |

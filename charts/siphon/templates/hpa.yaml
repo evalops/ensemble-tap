@@ -2,14 +2,14 @@
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: {{ include "ensemble-tap.fullname" . }}
+  name: {{ include "siphon.fullname" . }}
   labels:
-    {{- include "ensemble-tap.labels" . | nindent 4 }}
+    {{- include "siphon.labels" . | nindent 4 }}
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: {{ include "ensemble-tap.fullname" . }}
+    name: {{ include "siphon.fullname" . }}
   minReplicas: {{ .Values.autoscaling.minReplicas }}
   maxReplicas: {{ .Values.autoscaling.maxReplicas }}
   metrics:

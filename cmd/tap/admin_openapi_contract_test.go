@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/evalops/ensemble-tap/config"
+	"github.com/evalops/siphon/config"
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/getkin/kin-openapi/routers/gorillamux"
@@ -37,8 +37,8 @@ func TestAdminOpenAPIContractMatchesRuntime(t *testing.T) {
 	cfg := config.Config{
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
-			Stream:        "ENSEMBLE_TAP_CMD_TEST_OPENAPI",
-			SubjectPrefix: "ensemble.tap",
+			Stream:        "SIPHON_CMD_TEST_OPENAPI",
+			SubjectPrefix: "siphon",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},

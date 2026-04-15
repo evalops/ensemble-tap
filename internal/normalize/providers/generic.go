@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/evalops/ensemble-tap/internal/normalize"
+	"github.com/evalops/siphon/internal/normalize"
 )
 
 func NormalizeGeneric(provider, eventType, actionHint, providerEventID, tenantID string, body []byte) (normalize.NormalizedEvent, error) {

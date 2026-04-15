@@ -1,8 +1,8 @@
-{{- define "ensemble-tap.name" -}}
+{{- define "siphon.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{- define "ensemble-tap.fullname" -}}
+{{- define "siphon.fullname" -}}
 {{- if .Values.fullnameOverride -}}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
 {{- else -}}
@@ -15,32 +15,32 @@
 {{- end -}}
 {{- end -}}
 
-{{- define "ensemble-tap.chart" -}}
+{{- define "siphon.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{- define "ensemble-tap.labels" -}}
-helm.sh/chart: {{ include "ensemble-tap.chart" . }}
-app.kubernetes.io/name: {{ include "ensemble-tap.name" . }}
+{{- define "siphon.labels" -}}
+helm.sh/chart: {{ include "siphon.chart" . }}
+app.kubernetes.io/name: {{ include "siphon.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
-{{- define "ensemble-tap.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "ensemble-tap.name" . }}
+{{- define "siphon.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "siphon.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
-{{- define "ensemble-tap.serviceAccountName" -}}
+{{- define "siphon.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create -}}
-{{- default (include "ensemble-tap.fullname" .) .Values.serviceAccount.name -}}
+{{- default (include "siphon.fullname" .) .Values.serviceAccount.name -}}
 {{- else -}}
 {{- default "default" .Values.serviceAccount.name -}}
 {{- end -}}
 {{- end -}}
 
-{{- define "ensemble-tap.networkPolicyNATSPorts" -}}
+{{- define "siphon.networkPolicyNATSPorts" -}}
 {{- $seen := dict -}}
 {{- $ports := list -}}
 {{- $natsURL := toString (default "" .Values.config.nats.url) -}}
@@ -63,7 +63,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- toYaml $ports -}}
 {{- end -}}
 
-{{- define "ensemble-tap.networkPolicyClickHousePorts" -}}
+{{- define "siphon.networkPolicyClickHousePorts" -}}
 {{- $seen := dict -}}
 {{- $ports := list -}}
 {{- $clickhouseAddr := toString (default "" .Values.config.clickhouse.addr) -}}
@@ -86,7 +86,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- toYaml $ports -}}
 {{- end -}}
 
-{{- define "ensemble-tap.networkPolicyExtraPorts" -}}
+{{- define "siphon.networkPolicyExtraPorts" -}}
 {{- $seen := dict -}}
 {{- $ports := list -}}
 {{- range $extra := (default (list) .Values.networkPolicy.extraEgressPorts) -}}
@@ -99,24 +99,24 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- toYaml $ports -}}
 {{- end -}}
 
-{{- define "ensemble-tap.networkPolicyConfigPorts" -}}
+{{- define "siphon.networkPolicyConfigPorts" -}}
 {{- $seen := dict -}}
 {{- $ports := list -}}
-{{- range $port := (include "ensemble-tap.networkPolicyNATSPorts" . | fromYamlArray) -}}
+{{- range $port := (include "siphon.networkPolicyNATSPorts" . | fromYamlArray) -}}
   {{- $key := printf "%v" $port -}}
   {{- if not (hasKey $seen $key) -}}
     {{- $_ := set $seen $key true -}}
     {{- $ports = append $ports $port -}}
   {{- end -}}
 {{- end -}}
-{{- range $port := (include "ensemble-tap.networkPolicyClickHousePorts" . | fromYamlArray) -}}
+{{- range $port := (include "siphon.networkPolicyClickHousePorts" . | fromYamlArray) -}}
   {{- $key := printf "%v" $port -}}
   {{- if not (hasKey $seen $key) -}}
     {{- $_ := set $seen $key true -}}
     {{- $ports = append $ports $port -}}
   {{- end -}}
 {{- end -}}
-{{- range $port := (include "ensemble-tap.networkPolicyExtraPorts" . | fromYamlArray) -}}
+{{- range $port := (include "siphon.networkPolicyExtraPorts" . | fromYamlArray) -}}
   {{- $key := printf "%v" $port -}}
   {{- if not (hasKey $seen $key) -}}
     {{- $_ := set $seen $key true -}}

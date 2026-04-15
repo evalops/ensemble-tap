@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/evalops/ensemble-tap/config"
+	"github.com/evalops/siphon/config"
 	"golang.org/x/time/rate"
 )
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-release="ensemble-tap"
+release="siphon"
 namespace="ensemble"
 provider=""
 provider_secret=""
@@ -21,7 +21,7 @@ Provider must be one of: stripe, github, hubspot, linear, shopify, generic
 Options:
   --provider <name>         Provider name used in /webhooks/{provider}.
   --secret <value>          Provider webhook secret.
-  --release <name>          Helm release name (default: ensemble-tap).
+  --release <name>          Helm release name (default: siphon).
   --namespace <name>        Kubernetes namespace (default: ensemble).
   --service <name>          Kubernetes Service name (auto-discovered by default).
   --service-port <port>     Service HTTP port (default: 8080).
@@ -132,7 +132,7 @@ trim_slash() {
 get_service_name() {
   local discovered
   discovered="$(kubectl -n "$namespace" get svc \
-    -l "app.kubernetes.io/instance=$release,app.kubernetes.io/name=ensemble-tap" \
+    -l "app.kubernetes.io/instance=$release,app.kubernetes.io/name=siphon" \
     -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
   if [[ -n "$discovered" ]]; then
     printf '%s' "$discovered"
@@ -143,7 +143,7 @@ get_service_name() {
     printf '%s' "$discovered"
     return
   fi
-  discovered="$(kubectl -n "$namespace" get svc "${release}-ensemble-tap" -o jsonpath='{.metadata.name}' 2>/dev/null || true)"
+  discovered="$(kubectl -n "$namespace" get svc "${release}-siphon" -o jsonpath='{.metadata.name}' 2>/dev/null || true)"
   printf '%s' "$discovered"
 }
 
@@ -178,7 +178,7 @@ if [[ -z "$base_url" ]]; then
     exit 1
   fi
 
-  pf_log="/tmp/ensemble-tap-port-forward-${release}-${namespace}.log"
+  pf_log="/tmp/siphon-port-forward-${release}-${namespace}.log"
   kubectl -n "$namespace" port-forward "svc/$service_name" "${local_port}:${service_port}" >"$pf_log" 2>&1 &
   PF_PID="$!"
 
@@ -306,7 +306,7 @@ JSON
     ;;
 esac
 
-resp_file="/tmp/ensemble-tap-onboarding-smoke-response.json"
+resp_file="/tmp/siphon-onboarding-smoke-response.json"
 http_code="$(curl -sS -o "$resp_file" -w '%{http_code}' --max-time "$request_timeout" -X POST "${webhook_url}" "${headers[@]}" --data "$body")"
 
 if [[ "$http_code" != "202" ]]; then

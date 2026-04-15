@@ -2,9 +2,9 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ include "ensemble-tap.fullname" . }}-state
+  name: {{ include "siphon.fullname" . }}-state
   labels:
-    {{- include "ensemble-tap.labels" . | nindent 4 }}
+    {{- include "siphon.labels" . | nindent 4 }}
 spec:
   accessModes:
     {{- toYaml .Values.persistence.accessModes | nindent 4 }}

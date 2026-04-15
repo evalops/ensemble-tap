@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file is the operating guide for coding agents working in `ensemble-tap`.
+This file is the operating guide for coding agents working in `siphon`.
 
 ## 1. Mission and Scope
 
@@ -31,7 +31,7 @@ This file is the operating guide for coding agents working in `ensemble-tap`.
   - dead-letter queue publication/replay support
 - `internal/health`
   - liveness/readiness handlers and Prometheus metrics
-- `charts/ensemble-tap`
+- `charts/siphon`
   - Helm chart values, schema, templates
 - `docs/admin-openapi.yaml`
   - admin API contract expected to match runtime behavior
@@ -101,11 +101,11 @@ Always update all relevant surfaces:
   - valid and invalid cases
   - env override behavior if applicable
 - `config.example.yaml`
-- `charts/ensemble-tap/values.yaml`
-- `charts/ensemble-tap/values.schema.json`
+- `charts/siphon/values.yaml`
+- `charts/siphon/values.schema.json`
 - docs:
   - root `README.md`
-  - chart `charts/ensemble-tap/README.md` when Helm-visible
+  - chart `charts/siphon/README.md` when Helm-visible
 
 ### 7.2 Changing admin API behavior
 
@@ -126,8 +126,8 @@ Always update all relevant surfaces:
 ### 7.4 Changing Helm templates/values
 
 - Validate locally:
-  - `helm lint charts/ensemble-tap`
-  - `helm template ensemble-tap charts/ensemble-tap >/dev/null`
+  - `helm lint charts/siphon`
+  - `helm template siphon charts/siphon >/dev/null`
 
 ## 8. Critical Invariants
 
@@ -191,8 +191,8 @@ When adding metrics:
 Helpful coverage drill-down:
 
 ```bash
-go test ./... -coverprofile=/tmp/ensemble-tap.coverage.out
-go tool cover -func=/tmp/ensemble-tap.coverage.out
+go test ./... -coverprofile=/tmp/siphon.coverage.out
+go tool cover -func=/tmp/siphon.coverage.out
 ```
 
 ## 11. Performance and Reliability Guidance

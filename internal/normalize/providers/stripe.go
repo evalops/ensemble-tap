@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/evalops/ensemble-tap/internal/normalize"
+	"github.com/evalops/siphon/internal/normalize"
 	"github.com/stripe/stripe-go/v82"
 )
 

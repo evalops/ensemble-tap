@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: ghcr.io/evalops/ensemble-tap
+  repository: ghcr.io/evalops/siphon
   pullPolicy: IfNotPresent
   tag: ""
   digest: ""
@@ -42,7 +42,7 @@ ingress:
   className: ""
   annotations: {}
   hosts:
-    - host: ensemble-tap.local
+    - host: siphon.local
       paths:
         - path: /
           pathType: Prefix
@@ -119,20 +119,20 @@ env: []
 # - name: TAP_ADMIN_TOKEN
 #   valueFrom:
 #     secretKeyRef:
-#       name: ensemble-tap-secrets
+#       name: siphon-secrets
 #       key: adminToken
 # - name: TAP_ADMIN_TOKEN_READ
 #   valueFrom:
 #     secretKeyRef:
-#       name: ensemble-tap-secrets
+#       name: siphon-secrets
 #       key: adminTokenRead
 
 envSecrets: []
 # - name: TAP_ADMIN_TOKEN
-#   secretName: ensemble-tap-secrets
+#   secretName: siphon-secrets
 #   secretKey: adminToken
 # - name: TAP_ADMIN_TOKEN_READ
-#   secretName: ensemble-tap-secrets
+#   secretName: siphon-secrets
 #   secretKey: adminTokenRead
 
 envFromSecret: ""
@@ -143,14 +143,14 @@ persistence:
     - ReadWriteOnce
   size: 1Gi
   storageClassName: ""
-  mountPath: /var/lib/ensemble-tap/state
+  mountPath: /var/lib/siphon/state
 
 config:
   providers: {}
   nats:
     url: nats://nats:4222
-    stream: ENSEMBLE_TAP
-    subject_prefix: ensemble.tap
+    stream: SIPHON
+    subject_prefix: siphon
     tenant_scoped_subjects: false
     max_age: 168h
     dedup_window: 2m
@@ -235,7 +235,7 @@ config:
     admin_replay_job_timeout: 5m
     admin_replay_max_concurrent_jobs: 2
     admin_replay_store_backend: memory
-    admin_replay_sqlite_path: /var/lib/ensemble-tap/state/tap-admin-replay.db
+    admin_replay_sqlite_path: /var/lib/siphon/state/tap-admin-replay.db
     admin_replay_require_reason: false
     admin_replay_reason_min_length: 12
     admin_replay_max_queued_per_ip: 100
@@ -247,4 +247,4 @@ config:
     admin_mtls_client_cert_header: X-Forwarded-Client-Cert
   state:
     backend: memory
-    sqlite_path: /var/lib/ensemble-tap/state/tap-state.db
+    sqlite_path: /var/lib/siphon/state/tap-state.db

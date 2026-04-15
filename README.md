@@ -1,6 +1,6 @@
-# Ensemble Tap
+# Siphon
 
-Ensemble Tap is a standalone Go service that ingests SaaS webhook events, normalizes them into CloudEvents, publishes them to NATS JetStream, and optionally persists events into ClickHouse.
+Siphon is a standalone Go service that ingests SaaS webhook events, normalizes them into CloudEvents, publishes them to NATS JetStream, and optionally persists events into ClickHouse.
 
 ## Implemented Scope
 
@@ -77,7 +77,7 @@ What it does:
 Run smoke test only (for an existing install):
 
 ```bash
-./scripts/smoke-onboarding.sh --provider generic --release ensemble-tap --namespace ensemble --secret '<your-secret>'
+./scripts/smoke-onboarding.sh --provider generic --release siphon --namespace ensemble --secret '<your-secret>'
 ```
 
 ## Local Development
@@ -124,8 +124,8 @@ make ci-local
 Any string config value can be sourced from Vault by using a `vault://` reference:
 
 - Format: `vault://<path>#<key>` (defaults to key `value` when `#<key>` is omitted).
-- Example: `providers.generic.secret: vault://secret/data/homelab/ensemble-tap/runtime#generic-webhook-secret`
-- Example: `server.admin_token: vault://secret/data/homelab/ensemble-tap/runtime#admin-token`
+- Example: `providers.generic.secret: vault://secret/data/homelab/siphon/runtime#generic-webhook-secret`
+- Example: `server.admin_token: vault://secret/data/homelab/siphon/runtime#admin-token`
 
 Vault auth config lives under `vault.*`:
 
@@ -241,7 +241,7 @@ curl -i 'http://localhost:8080/admin/poller-status?provider=hubspot&tenant=tenan
 Install with Helm:
 
 ```bash
-helm upgrade --install ensemble-tap ./charts/ensemble-tap \
+helm upgrade --install siphon ./charts/siphon \
   --namespace ensemble \
   --create-namespace
 ```
@@ -251,7 +251,7 @@ Notes:
 - NetworkPolicy automatically allows NATS/ClickHouse TCP egress ports derived from chart config (`networkPolicy.allowConfigPorts=true`).
 - Image pinning by digest is supported via `image.digest` (uses `repository@sha256:...`).
 
-See chart-specific usage in `charts/ensemble-tap/README.md`.
+See chart-specific usage in `charts/siphon/README.md`.
 
 ## Release and Operations
 

@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
-  title: Ensemble Tap Admin API
+  title: Siphon Admin API
   version: "1.0.0"
-  description: Contract for authenticated admin endpoints exposed by Ensemble Tap.
+  description: Contract for authenticated admin endpoints exposed by Siphon.
 servers:
   - url: http://localhost:8080
 paths:

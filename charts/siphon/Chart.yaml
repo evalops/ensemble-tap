@@ -1,5 +1,5 @@
 apiVersion: v2
-name: ensemble-tap
+name: siphon
 description: Ingest SaaS webhooks, normalize CloudEvents, and publish to NATS JetStream
 type: application
 version: 0.1.0

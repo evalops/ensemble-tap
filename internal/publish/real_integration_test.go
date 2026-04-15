@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
-	"github.com/evalops/ensemble-tap/config"
-	"github.com/evalops/ensemble-tap/internal/backoff"
-	"github.com/evalops/ensemble-tap/internal/normalize"
+	"github.com/evalops/siphon/config"
+	"github.com/evalops/siphon/internal/backoff"
+	"github.com/evalops/siphon/internal/normalize"
 	"github.com/nats-io/nats.go"
 )
 
@@ -24,11 +24,11 @@ func TestRealNATSClickHousePipeline(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	streamName := "ENSEMBLE_TAP_REAL_IT"
+	streamName := "SIPHON_REAL_IT"
 	natsCfg := config.NATSConfig{
 		URL:           natsURL,
 		Stream:        streamName,
-		SubjectPrefix: "ensemble.tap",
+		SubjectPrefix: "siphon",
 		MaxAge:        time.Hour,
 		DedupWindow:   time.Minute,
 	}

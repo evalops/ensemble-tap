@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	tapv1 "github.com/evalops/ensemble-tap/proto/tap/v1"
-	"github.com/evalops/ensemble-tap/proto/tap/v1/tapv1connect"
+	tapv1 "github.com/evalops/siphon/proto/tap/v1"
+	"github.com/evalops/siphon/proto/tap/v1/tapv1connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

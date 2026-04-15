@@ -19,9 +19,9 @@ import (
 	"time"
 
 	cloudeventsevent "github.com/cloudevents/sdk-go/v2/event"
-	"github.com/evalops/ensemble-tap/config"
-	"github.com/evalops/ensemble-tap/internal/health"
-	"github.com/evalops/ensemble-tap/internal/normalize"
+	"github.com/evalops/siphon/config"
+	"github.com/evalops/siphon/internal/health"
+	"github.com/evalops/siphon/internal/normalize"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -31,8 +31,8 @@ func TestNATSPublisherPublishesAndDeduplicates(t *testing.T) {
 	s := runNATSServer(t)
 	cfg := config.NATSConfig{
 		URL:           s.ClientURL(),
-		Stream:        "ENSEMBLE_TAP_TEST",
-		SubjectPrefix: "ensemble.tap",
+		Stream:        "SIPHON_TEST",
+		SubjectPrefix: "siphon",
 		MaxAge:        time.Hour,
 		DedupWindow:   2 * time.Minute,
 	}
@@ -60,7 +60,7 @@ func TestNATSPublisherPublishesAndDeduplicates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("publish first message: %v", err)
 	}
-	if subject != "ensemble.tap.stripe.invoice.paid" {
+	if subject != "siphon.stripe.invoice.paid" {
 		t.Fatalf("unexpected subject: %q", subject)
 	}
 
@@ -104,8 +104,8 @@ func TestNATSPublisherEnsureStreamIsIdempotent(t *testing.T) {
 	s := runNATSServer(t)
 	cfg := config.NATSConfig{
 		URL:           s.ClientURL(),
-		Stream:        "ENSEMBLE_TAP_IDEMPOTENT",
-		SubjectPrefix: "ensemble.tap",
+		Stream:        "SIPHON_IDEMPOTENT",
+		SubjectPrefix: "siphon",
 		MaxAge:        time.Hour,
 		DedupWindow:   time.Minute,
 	}
@@ -143,8 +143,8 @@ func TestNATSPublisherTenantScopedSubject(t *testing.T) {
 	s := runNATSServer(t)
 	cfg := config.NATSConfig{
 		URL:                  s.ClientURL(),
-		Stream:               "ENSEMBLE_TAP_TENANT_SUBJECT",
-		SubjectPrefix:        "ensemble.tap",
+		Stream:               "SIPHON_TENANT_SUBJECT",
+		SubjectPrefix:        "siphon",
 		TenantScopedSubjects: true,
 		MaxAge:               time.Hour,
 		DedupWindow:          2 * time.Minute,
@@ -173,7 +173,7 @@ func TestNATSPublisherTenantScopedSubject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("publish event: %v", err)
 	}
-	if subject != "ensemble.tap.tenant_1.stripe.invoice.paid" {
+	if subject != "siphon.tenant_1.stripe.invoice.paid" {
 		t.Fatalf("unexpected subject: %q", subject)
 	}
 }
@@ -182,8 +182,8 @@ func TestNATSPublisherSetsRequestIDHeader(t *testing.T) {
 	s := runNATSServer(t)
 	cfg := config.NATSConfig{
 		URL:           s.ClientURL(),
-		Stream:        "ENSEMBLE_TAP_REQ_ID_HEADER",
-		SubjectPrefix: "ensemble.tap",
+		Stream:        "SIPHON_REQ_ID_HEADER",
+		SubjectPrefix: "siphon",
 		MaxAge:        time.Hour,
 		DedupWindow:   2 * time.Minute,
 	}
@@ -230,8 +230,8 @@ func TestNATSPublisherPublishesWithTokenAuthOverTLS(t *testing.T) {
 
 	cfg := config.NATSConfig{
 		URL:               "tls://" + s.Addr().String(),
-		Stream:            "ENSEMBLE_TAP_TLS_TOKEN",
-		SubjectPrefix:     "ensemble.tap",
+		Stream:            "SIPHON_TLS_TOKEN",
+		SubjectPrefix:     "siphon",
 		MaxAge:            time.Hour,
 		DedupWindow:       2 * time.Minute,
 		Token:             "test-token",
@@ -277,8 +277,8 @@ func TestNATSPublisherPublishesWithUserPassOverTLS(t *testing.T) {
 
 	cfg := config.NATSConfig{
 		URL:               "tls://" + s.Addr().String(),
-		Stream:            "ENSEMBLE_TAP_TLS_USERPASS",
-		SubjectPrefix:     "ensemble.tap",
+		Stream:            "SIPHON_TLS_USERPASS",
+		SubjectPrefix:     "siphon",
 		MaxAge:            time.Hour,
 		DedupWindow:       2 * time.Minute,
 		Username:          "tap-user",
@@ -319,8 +319,8 @@ func TestNATSPublisherRawInfersRequestIDHeaderFromPayload(t *testing.T) {
 	s := runNATSServer(t)
 	cfg := config.NATSConfig{
 		URL:           s.ClientURL(),
-		Stream:        "ENSEMBLE_TAP_RAW_REQ_ID_HEADER",
-		SubjectPrefix: "ensemble.tap",
+		Stream:        "SIPHON_RAW_REQ_ID_HEADER",
+		SubjectPrefix: "siphon",
 		MaxAge:        time.Hour,
 		DedupWindow:   2 * time.Minute,
 	}
@@ -349,7 +349,7 @@ func TestNATSPublisherRawInfersRequestIDHeaderFromPayload(t *testing.T) {
 		t.Fatalf("marshal cloud event: %v", err)
 	}
 
-	if err := pub.PublishRaw(ctx, "ensemble.tap.github.issues.opened", payload, "raw_req_id_1", ""); err != nil {
+	if err := pub.PublishRaw(ctx, "siphon.github.issues.opened", payload, "raw_req_id_1", ""); err != nil {
 		t.Fatalf("publish raw message: %v", err)
 	}
 
@@ -598,10 +598,10 @@ func TestPublishRetryReason(t *testing.T) {
 }
 
 func TestAdvisoryKindFromSubject(t *testing.T) {
-	if got := advisoryKindFromSubject("$JS.EVENT.ADVISORY.CONSUMER.CREATED.ENSEMBLE_TAP"); got != "consumer.created" {
+	if got := advisoryKindFromSubject("$JS.EVENT.ADVISORY.CONSUMER.CREATED.SIPHON"); got != "consumer.created" {
 		t.Fatalf("expected advisory kind consumer.created, got %q", got)
 	}
-	if got := advisoryKindFromSubject("$JS.EVENT.ADVISORY.STREAM..ENSEMBLE_TAP"); got != "stream" {
+	if got := advisoryKindFromSubject("$JS.EVENT.ADVISORY.STREAM..SIPHON"); got != "stream" {
 		t.Fatalf("expected advisory kind stream, got %q", got)
 	}
 	if got := advisoryKindFromSubject("invalid"); got != "unknown" {
@@ -627,7 +627,7 @@ func TestSubscribeJetStreamAdvisoriesIncrementsMetric(t *testing.T) {
 	}
 	defer pub.Close()
 
-	if err := nc.Publish("$JS.EVENT.ADVISORY.CONSUMER.CREATED.ENSEMBLE_TAP", []byte("{}")); err != nil {
+	if err := nc.Publish("$JS.EVENT.ADVISORY.CONSUMER.CREATED.SIPHON", []byte("{}")); err != nil {
 		t.Fatalf("publish advisory message: %v", err)
 	}
 	if err := nc.FlushTimeout(2 * time.Second); err != nil {
@@ -668,7 +668,7 @@ func TestPublishMsgWithRetryReturnsErrorWhenNoStreamMatchesSubject(t *testing.T)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	_, err = pub.publishMsgWithRetry(ctx, &nats.Msg{Subject: "ensemble.tap.unmatched.subject", Data: []byte("payload")})
+	_, err = pub.publishMsgWithRetry(ctx, &nats.Msg{Subject: "siphon.unmatched.subject", Data: []byte("payload")})
 	if err == nil {
 		t.Fatalf("expected publish error when no stream matches subject")
 	}

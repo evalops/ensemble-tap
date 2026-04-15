@@ -11,13 +11,13 @@ import (
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
-	"github.com/evalops/ensemble-tap/config"
-	"github.com/evalops/ensemble-tap/internal/dlq"
-	"github.com/evalops/ensemble-tap/internal/health"
-	"github.com/evalops/ensemble-tap/internal/normalize"
-	"github.com/evalops/ensemble-tap/internal/poller"
-	pollproviders "github.com/evalops/ensemble-tap/internal/poller/providers"
-	"github.com/evalops/ensemble-tap/internal/store"
+	"github.com/evalops/siphon/config"
+	"github.com/evalops/siphon/internal/dlq"
+	"github.com/evalops/siphon/internal/health"
+	"github.com/evalops/siphon/internal/normalize"
+	"github.com/evalops/siphon/internal/poller"
+	pollproviders "github.com/evalops/siphon/internal/poller/providers"
+	"github.com/evalops/siphon/internal/store"
 	"golang.org/x/time/rate"
 )
 

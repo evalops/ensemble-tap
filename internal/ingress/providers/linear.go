@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	cfgpkg "github.com/evalops/ensemble-tap/config"
-	norm "github.com/evalops/ensemble-tap/internal/normalize/providers"
+	cfgpkg "github.com/evalops/siphon/config"
+	norm "github.com/evalops/siphon/internal/normalize/providers"
 )
 
 type LinearHandler struct{}

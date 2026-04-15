@@ -1,9 +1,9 @@
-# ensemble-tap Helm Chart
+# siphon Helm Chart
 
 ## Install
 
 ```bash
-helm upgrade --install ensemble-tap ./charts/ensemble-tap \
+helm upgrade --install siphon ./charts/siphon \
   --namespace ensemble \
   --create-namespace
 ```
@@ -11,7 +11,7 @@ helm upgrade --install ensemble-tap ./charts/ensemble-tap \
 Pin by digest (recommended for production rollouts):
 
 ```bash
-helm upgrade --install ensemble-tap ./charts/ensemble-tap \
+helm upgrade --install siphon ./charts/siphon \
   --namespace ensemble \
   --set image.digest=sha256:<image-digest>
 ```
@@ -29,7 +29,7 @@ The chart renders `config.yaml` from `.Values.config`. Provide provider secrets 
 Example:
 
 ```bash
-helm upgrade --install ensemble-tap ./charts/ensemble-tap \
+helm upgrade --install siphon ./charts/siphon \
   --namespace ensemble \
   --set env[0].name=STRIPE_WEBHOOK_SECRET \
   --set env[0].value=your-secret \
@@ -37,7 +37,7 @@ helm upgrade --install ensemble-tap ./charts/ensemble-tap \
   --set config.providers.stripe.secret='${STRIPE_WEBHOOK_SECRET}'
 
 # Optional admin rotation, scoped tokens, and replay safety settings
-helm upgrade --install ensemble-tap ./charts/ensemble-tap \
+helm upgrade --install siphon ./charts/siphon \
   --namespace ensemble \
   --set env[0].name=TAP_ADMIN_TOKEN \
   --set env[0].value=primary-token \
@@ -60,7 +60,7 @@ helm upgrade --install ensemble-tap ./charts/ensemble-tap \
   --set config.server.admin_replay_job_timeout=5m \
   --set config.server.admin_replay_max_concurrent_jobs=2 \
   --set config.server.admin_replay_store_backend=sqlite \
-  --set config.server.admin_replay_sqlite_path=/var/lib/ensemble-tap/state/tap-admin-replay.db \
+  --set config.server.admin_replay_sqlite_path=/var/lib/siphon/state/tap-admin-replay.db \
   --set config.server.admin_replay_require_reason=true \
   --set config.server.admin_replay_reason_min_length=12 \
   --set config.server.admin_replay_max_queued_per_ip=100 \
@@ -93,18 +93,18 @@ Use `vault://<path>#<key>` in config values and configure `config.vault.*`.
 Example (Kubernetes auth):
 
 ```bash
-helm upgrade --install ensemble-tap ./charts/ensemble-tap \
+helm upgrade --install siphon ./charts/siphon \
   --namespace ensemble \
   --set serviceAccount.automount=true \
   --set env[0].name=VAULT_ADDR \
   --set env[0].value='https://vault.vault.svc:8200' \
   --set config.vault.address='${VAULT_ADDR}' \
   --set config.vault.auth_method=kubernetes \
-  --set config.vault.kubernetes_role=ensemble-tap-runtime \
+  --set config.vault.kubernetes_role=siphon-runtime \
   --set config.vault.kubernetes_mount_path=kubernetes \
   --set config.providers.generic.mode=webhook \
-  --set config.providers.generic.secret='vault://secret/data/homelab/ensemble-tap/runtime#generic-webhook-secret' \
-  --set config.server.admin_token='vault://secret/data/homelab/ensemble-tap/runtime#admin-token'
+  --set config.providers.generic.secret='vault://secret/data/homelab/siphon/runtime#generic-webhook-secret' \
+  --set config.server.admin_token='vault://secret/data/homelab/siphon/runtime#admin-token'
 ```
 
 Notes:
@@ -115,12 +115,12 @@ Notes:
 ## Tune NATS and ClickHouse
 
 ```bash
-helm upgrade --install ensemble-tap ./charts/ensemble-tap \
+helm upgrade --install siphon ./charts/siphon \
   --namespace ensemble \
   --set env[0].name=NATS_URL \
   --set env[0].value='nats://nats-a:4222,nats-b:4222' \
   --set env[1].name=CLICKHOUSE_USERNAME \
-  --set env[1].value='ensemble_tap_ingest' \
+  --set env[1].value='siphon_ingest' \
   --set env[2].name=CLICKHOUSE_PASSWORD \
   --set env[2].value='super-secret' \
   --set config.nats.url='${NATS_URL}' \
@@ -131,8 +131,8 @@ helm upgrade --install ensemble-tap ./charts/ensemble-tap \
   --set config.nats.publish_max_retries=3 \
   --set config.nats.publish_retry_backoff=100ms \
   --set config.nats.secure=true \
-  --set config.nats.ca_file=/var/run/ensemble-tap/nats/ca.crt \
-  --set config.nats.creds_file=/var/run/ensemble-tap/nats/client.creds \
+  --set config.nats.ca_file=/var/run/siphon/nats/ca.crt \
+  --set config.nats.creds_file=/var/run/siphon/nats/client.creds \
   --set config.nats.stream_replicas=3 \
   --set config.nats.stream_storage=file \
   --set config.nats.stream_discard=old \
@@ -148,9 +148,9 @@ helm upgrade --install ensemble-tap ./charts/ensemble-tap \
   --set config.clickhouse.password='${CLICKHOUSE_PASSWORD}' \
   --set config.clickhouse.secure=true \
   --set config.clickhouse.tls_server_name=clickhouse.internal \
-  --set config.clickhouse.ca_file=/var/run/ensemble-tap/certs/clickhouse-ca.crt \
-  --set config.clickhouse.cert_file=/var/run/ensemble-tap/certs/clickhouse-client.crt \
-  --set config.clickhouse.key_file=/var/run/ensemble-tap/certs/clickhouse-client.key \
+  --set config.clickhouse.ca_file=/var/run/siphon/certs/clickhouse-ca.crt \
+  --set config.clickhouse.cert_file=/var/run/siphon/certs/clickhouse-client.crt \
+  --set config.clickhouse.key_file=/var/run/siphon/certs/clickhouse-client.key \
   --set config.clickhouse.dial_timeout=5s \
   --set config.clickhouse.max_open_conns=8 \
   --set config.clickhouse.max_idle_conns=4 \
@@ -170,9 +170,9 @@ helm upgrade --install ensemble-tap ./charts/ensemble-tap \
   --set config.clickhouse.insert_timeout=15s \
   --set config.clickhouse.retention_ttl=2160h \
   --set extraVolumes[0].name=tap-transport-secrets \
-  --set extraVolumes[0].secret.secretName=ensemble-tap-transport-secrets \
+  --set extraVolumes[0].secret.secretName=siphon-transport-secrets \
   --set extraVolumeMounts[0].name=tap-transport-secrets \
-  --set extraVolumeMounts[0].mountPath=/var/run/ensemble-tap \
+  --set extraVolumeMounts[0].mountPath=/var/run/siphon \
   --set extraVolumeMounts[0].readOnly=true
 ```
 
@@ -200,7 +200,7 @@ Auth notes:
 Example selector-based transport policy:
 
 ```bash
-helm upgrade --install ensemble-tap ./charts/ensemble-tap \
+helm upgrade --install siphon ./charts/siphon \
   --namespace ensemble \
   --set networkPolicy.allowConfigPorts=true \
   --set networkPolicy.natsEgressTo[0].namespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=messaging \
@@ -211,7 +211,7 @@ helm upgrade --install ensemble-tap ./charts/ensemble-tap \
 ## Enable sqlite state persistence
 
 ```bash
-helm upgrade --install ensemble-tap ./charts/ensemble-tap \
+helm upgrade --install siphon ./charts/siphon \
   --namespace ensemble \
   --set config.state.backend=sqlite \
   --set persistence.enabled=true

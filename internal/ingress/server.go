@@ -15,11 +15,11 @@ import (
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
-	"github.com/evalops/ensemble-tap/config"
-	"github.com/evalops/ensemble-tap/internal/dlq"
-	"github.com/evalops/ensemble-tap/internal/health"
-	"github.com/evalops/ensemble-tap/internal/ingress/providers"
-	"github.com/evalops/ensemble-tap/internal/normalize"
+	"github.com/evalops/siphon/config"
+	"github.com/evalops/siphon/internal/dlq"
+	"github.com/evalops/siphon/internal/health"
+	"github.com/evalops/siphon/internal/ingress/providers"
+	"github.com/evalops/siphon/internal/normalize"
 )
 
 type Publisher interface {

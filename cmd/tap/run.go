@@ -8,11 +8,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/evalops/ensemble-tap/config"
-	"github.com/evalops/ensemble-tap/internal/dlq"
-	"github.com/evalops/ensemble-tap/internal/health"
-	"github.com/evalops/ensemble-tap/internal/ingress"
-	"github.com/evalops/ensemble-tap/internal/publish"
+	"github.com/evalops/siphon/config"
+	"github.com/evalops/siphon/internal/dlq"
+	"github.com/evalops/siphon/internal/health"
+	"github.com/evalops/siphon/internal/ingress"
+	"github.com/evalops/siphon/internal/publish"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -146,7 +146,7 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	httpServer := ingressServer.HTTPServer(mux)
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Info("ensemble-tap started", "addr", httpServer.Addr, "base_path", cfg.Server.BasePath)
+		logger.Info("siphon started", "addr", httpServer.Addr, "base_path", cfg.Server.BasePath)
 		errCh <- httpServer.ListenAndServe()
 	}()
 

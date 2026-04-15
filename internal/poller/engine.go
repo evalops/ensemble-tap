@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/evalops/ensemble-tap/internal/normalize"
+	"github.com/evalops/siphon/internal/normalize"
 )
 
 type SnapshotStore interface {

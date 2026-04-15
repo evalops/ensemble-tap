@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-release="ensemble-tap"
+release="siphon"
 namespace="ensemble"
-chart_path="./charts/ensemble-tap"
+chart_path="./charts/siphon"
 values_file="./values.onboarding.yaml"
 secret_name=""
 provider=""
@@ -23,16 +23,16 @@ Usage: $0 [options]
 Guided Helm bootstrap for the fastest path to first event.
 
 Options:
-  --release <name>           Helm release name (default: ensemble-tap)
+  --release <name>           Helm release name (default: siphon)
   --namespace <name>         Kubernetes namespace (default: ensemble)
-  --chart <path>             Helm chart path (default: ./charts/ensemble-tap)
+  --chart <path>             Helm chart path (default: ./charts/siphon)
   --values-file <path>       Generated values file (default: ./values.onboarding.yaml)
   --secret-name <name>       Kubernetes secret name (default: <release>-onboarding-secrets)
   --provider <name>          stripe|github|hubspot|linear|shopify|generic
   --provider-secret <value>  Webhook secret for chosen provider
   --nats-url <url>           NATS URL (default: nats://nats:4222)
   --clickhouse-addr <addr>   Optional ClickHouse host:port (empty disables sink)
-  --clickhouse-username <v>  Optional ClickHouse username (default: ensemble_tap_ingest when sink enabled)
+  --clickhouse-username <v>  Optional ClickHouse username (default: siphon_ingest when sink enabled)
   --clickhouse-password <v>  Optional ClickHouse password
   --tenant-id <id>           Optional tenant path segment for smoke test
   --skip-smoke               Skip webhook smoke test
@@ -174,7 +174,7 @@ if [[ -z "$clickhouse_addr" ]]; then
   read -r -p "ClickHouse addr (host:port, leave empty to disable sink): " clickhouse_addr
 fi
 if [[ -n "$clickhouse_addr" && -z "$clickhouse_username" ]]; then
-  clickhouse_username="ensemble_tap_ingest"
+  clickhouse_username="siphon_ingest"
 fi
 if [[ -n "$clickhouse_addr" && -z "$clickhouse_password" ]]; then
   read -r -s -p "ClickHouse password (optional, press Enter to skip): " clickhouse_password
