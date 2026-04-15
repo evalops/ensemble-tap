@@ -11,9 +11,12 @@ if [ ${#staged_go_files[@]} -eq 0 ]; then
 fi
 
 stashed=0
+stash_ref="stash@{0}"
 cleanup() {
   if [ "$stashed" -eq 1 ]; then
-    git stash pop -q >/dev/null 2>&1 || true
+    if ! git stash pop -q >/dev/null 2>&1; then
+      echo "warning: failed to restore stashed changes from ${stash_ref}; recover them with 'git stash apply ${stash_ref}'." >&2
+    fi
   fi
 }
 trap cleanup EXIT
@@ -21,6 +24,7 @@ trap cleanup EXIT
 if ! git diff --quiet -- . || [ -n "$(git ls-files --others --exclude-standard)" ]; then
   git stash push -q --keep-index --include-untracked -m "pre-commit-$(date +%s)"
   stashed=1
+  stash_ref=$(git stash list -n 1 --format='%gd')
 fi
 
 echo "Running gofmt on staged files..."
