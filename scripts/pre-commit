@@ -6,9 +6,9 @@ set -euo pipefail
 
 STAGED=$(git diff --cached --name-only --diff-filter=ACM)
 
-# ─── Guard: no "ensemble-tap" / "ensemble.tap" reintroduction ───
-if echo "$STAGED" | xargs grep -l 'ensemble-tap\|ensemble\.tap\|ENSEMBLE_TAP' 2>/dev/null; then
-  echo "error: staged files contain legacy 'ensemble-tap' references — rename to 'siphon'"
+# ─── Guard: no legacy project-name reintroduction ───
+if echo "$STAGED" | xargs grep -l 'ensemble[-]tap\|ensemble[.]tap\|ENSEMBLE[_]TAP' 2>/dev/null; then
+  echo "error: staged files contain legacy project-name references — rename to 'siphon'"
   exit 1
 fi
 
