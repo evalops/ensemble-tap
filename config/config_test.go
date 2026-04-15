@@ -23,7 +23,7 @@ providers:
 nats:
   url: nats://localhost:4222
   stream: SIPHON
-  subject_prefix: siphon
+  subject_prefix: siphon.tap
   max_age: 168h
   dedup_window: 2m
 server:

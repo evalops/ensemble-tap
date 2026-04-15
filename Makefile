@@ -56,4 +56,4 @@ onboard:
 
 onboard-smoke:
 	@if [ -z "$(ONBOARD_SECRET)" ]; then echo "ONBOARD_SECRET is required"; exit 1; fi
-	./scripts/smoke-onboarding.sh --provider $(or $(ONBOARD_PROVIDER),generic) --release $(or $(ONBOARD_RELEASE),siphon) --namespace $(or $(ONBOARD_NAMESPACE),ensemble) --secret "$(ONBOARD_SECRET)"
+	./scripts/smoke-onboarding.sh --provider $(or $(ONBOARD_PROVIDER),generic) --release $(or $(ONBOARD_RELEASE),siphon) --namespace $(or $(ONBOARD_NAMESPACE),siphon) --secret "$(ONBOARD_SECRET)"
