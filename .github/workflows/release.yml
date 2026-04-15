@@ -16,7 +16,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Go
         uses: evalops/service-runtime/.github/actions/setup-go-service@d348819979602be3a2b8349b5dccd41488bb7cd2

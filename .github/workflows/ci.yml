@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Buf
         uses: bufbuild/buf-action@v1
@@ -43,7 +43,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Go
         uses: evalops/service-runtime/.github/actions/setup-go-service@d348819979602be3a2b8349b5dccd41488bb7cd2
@@ -84,7 +84,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Go
         uses: evalops/service-runtime/.github/actions/setup-go-service@d348819979602be3a2b8349b5dccd41488bb7cd2
@@ -103,7 +103,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Go
         uses: evalops/service-runtime/.github/actions/setup-go-service@d348819979602be3a2b8349b5dccd41488bb7cd2
@@ -139,7 +139,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Go
         uses: evalops/service-runtime/.github/actions/setup-go-service@d348819979602be3a2b8349b5dccd41488bb7cd2
@@ -155,7 +155,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Go
         uses: evalops/service-runtime/.github/actions/setup-go-service@d348819979602be3a2b8349b5dccd41488bb7cd2
@@ -185,7 +185,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Build image
         uses: evalops/service-runtime/.github/actions/build-docker-image@d348819979602be3a2b8349b5dccd41488bb7cd2
@@ -197,7 +197,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Helm
         uses: azure/setup-helm@v4
@@ -213,7 +213,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Go
         uses: evalops/service-runtime/.github/actions/setup-go-service@d348819979602be3a2b8349b5dccd41488bb7cd2
@@ -250,7 +250,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Go
         uses: evalops/service-runtime/.github/actions/setup-go-service@d348819979602be3a2b8349b5dccd41488bb7cd2
@@ -290,7 +290,7 @@ jobs:
       TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Trivy filesystem scan
         uses: aquasecurity/trivy-action@v0.35.0
@@ -307,7 +307,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Generate source SBOM
         uses: anchore/sbom-action@v0
@@ -329,7 +329,7 @@ jobs:
       TAP_SERVER_PORT: "18080"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Go
         uses: evalops/service-runtime/.github/actions/setup-go-service@d348819979602be3a2b8349b5dccd41488bb7cd2
@@ -406,7 +406,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Go
         uses: evalops/service-runtime/.github/actions/setup-go-service@d348819979602be3a2b8349b5dccd41488bb7cd2
@@ -476,7 +476,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Collect CI flake metrics
         env:
@@ -520,7 +520,7 @@ jobs:
       issues: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Create issue with failed logs
         env:
