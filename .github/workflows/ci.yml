@@ -114,7 +114,7 @@ jobs:
       - name: Restore tool cache
         if: env.DISABLE_TOOL_CACHE != 'true'
         id: staticcheck-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.TOOLS_BIN }}
           key: staticcheck-${{ runner.os }}-${{ env.GOTOOLCHAIN }}-${{ env.STATICCHECK_VERSION }}
@@ -224,7 +224,7 @@ jobs:
       - name: Restore tool cache
         if: env.DISABLE_TOOL_CACHE != 'true'
         id: gosec-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.TOOLS_BIN }}
           key: gosec-${{ runner.os }}-${{ env.GOTOOLCHAIN }}-${{ env.GOSEC_VERSION }}
@@ -261,7 +261,7 @@ jobs:
       - name: Restore tool cache
         if: env.DISABLE_TOOL_CACHE != 'true'
         id: govulncheck-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.TOOLS_BIN }}
           key: govulncheck-${{ runner.os }}-${{ env.GOTOOLCHAIN }}-${{ env.GOVULNCHECK_VERSION }}
