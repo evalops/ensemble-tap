@@ -976,6 +976,7 @@ func Load(path string) (Config, error) {
 		if err != nil {
 			return Config{}, fmt.Errorf("create temp config: %w", err)
 		}
+		// #nosec G703 -- tmpFile is created by os.CreateTemp above and removed in-process.
 		defer func() {
 			_ = os.Remove(tmpFile.Name())
 		}()
