@@ -3,7 +3,7 @@ package normalize
 import "strings"
 
 func BuildType(provider, entityType, action string) string {
-	return strings.ToLower("siphon." + sanitize(provider) + "." + sanitize(entityType) + "." + sanitize(action))
+	return strings.ToLower("siphon.tap." + sanitize(provider) + "." + sanitize(entityType) + "." + sanitize(action))
 }
 
 func BuildSubject(prefix, provider, entityType, action string) string {

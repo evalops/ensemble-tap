@@ -22,7 +22,7 @@ func TestDLQRecordAndReplay(t *testing.T) {
 		t.Fatalf("jetstream: %v", err)
 	}
 
-	cfg := config.NATSConfig{Stream: "SIPHON", SubjectPrefix: "siphon"}
+	cfg := config.NATSConfig{Stream: "SIPHON", SubjectPrefix: "siphon.tap"}
 	p, err := NewPublisher(context.Background(), cfg, js)
 	if err != nil {
 		t.Fatalf("new dlq publisher: %v", err)
@@ -33,7 +33,7 @@ func TestDLQRecordAndReplay(t *testing.T) {
 		Provider:        "hubspot",
 		RequestID:       "req-dlq-1",
 		Reason:          "nats timeout",
-		OriginalSubject: "siphon.hubspot.deal.updated",
+		OriginalSubject: "siphon.tap.hubspot.deal.updated",
 		OriginalPayload: []byte(`{"id":"evt_1"}`),
 		OriginalDedupID: "evt_1",
 	}
@@ -72,7 +72,7 @@ func TestDLQPending(t *testing.T) {
 		t.Fatalf("jetstream: %v", err)
 	}
 
-	cfg := config.NATSConfig{Stream: "SIPHON_PENDING", SubjectPrefix: "siphon"}
+	cfg := config.NATSConfig{Stream: "SIPHON_PENDING", SubjectPrefix: "siphon.tap"}
 	p, err := NewPublisher(context.Background(), cfg, js)
 	if err != nil {
 		t.Fatalf("new dlq publisher: %v", err)
@@ -82,7 +82,7 @@ func TestDLQPending(t *testing.T) {
 		Stage:           "publish",
 		Provider:        "stripe",
 		Reason:          "forced test",
-		OriginalSubject: "siphon.stripe.invoice.updated",
+		OriginalSubject: "siphon.tap.stripe.invoice.updated",
 		OriginalPayload: []byte(`{"id":"evt_pending_1"}`),
 		OriginalDedupID: "evt_pending_1",
 	}

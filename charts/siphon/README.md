@@ -4,7 +4,7 @@
 
 ```bash
 helm upgrade --install siphon ./charts/siphon \
-  --namespace ensemble \
+  --namespace siphon \
   --create-namespace
 ```
 
@@ -12,7 +12,7 @@ Pin by digest (recommended for production rollouts):
 
 ```bash
 helm upgrade --install siphon ./charts/siphon \
-  --namespace ensemble \
+  --namespace siphon \
   --set image.digest=sha256:<image-digest>
 ```
 
@@ -30,7 +30,7 @@ Example:
 
 ```bash
 helm upgrade --install siphon ./charts/siphon \
-  --namespace ensemble \
+  --namespace siphon \
   --set env[0].name=STRIPE_WEBHOOK_SECRET \
   --set env[0].value=your-secret \
   --set config.providers.stripe.mode=webhook \
@@ -38,7 +38,7 @@ helm upgrade --install siphon ./charts/siphon \
 
 # Optional admin rotation, scoped tokens, and replay safety settings
 helm upgrade --install siphon ./charts/siphon \
-  --namespace ensemble \
+  --namespace siphon \
   --set env[0].name=TAP_ADMIN_TOKEN \
   --set env[0].value=primary-token \
   --set env[1].name=TAP_ADMIN_TOKEN_SECONDARY \
@@ -94,7 +94,7 @@ Example (Kubernetes auth):
 
 ```bash
 helm upgrade --install siphon ./charts/siphon \
-  --namespace ensemble \
+  --namespace siphon \
   --set serviceAccount.automount=true \
   --set env[0].name=VAULT_ADDR \
   --set env[0].value='https://vault.vault.svc:8200' \
@@ -116,7 +116,7 @@ Notes:
 
 ```bash
 helm upgrade --install siphon ./charts/siphon \
-  --namespace ensemble \
+  --namespace siphon \
   --set env[0].name=NATS_URL \
   --set env[0].value='nats://nats-a:4222,nats-b:4222' \
   --set env[1].name=CLICKHOUSE_USERNAME \
@@ -201,7 +201,7 @@ Example selector-based transport policy:
 
 ```bash
 helm upgrade --install siphon ./charts/siphon \
-  --namespace ensemble \
+  --namespace siphon \
   --set networkPolicy.allowConfigPorts=true \
   --set networkPolicy.natsEgressTo[0].namespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=messaging \
   --set networkPolicy.natsEgressTo[0].podSelector.matchLabels.app=nats \
@@ -212,7 +212,7 @@ helm upgrade --install siphon ./charts/siphon \
 
 ```bash
 helm upgrade --install siphon ./charts/siphon \
-  --namespace ensemble \
+  --namespace siphon \
   --set config.state.backend=sqlite \
   --set persistence.enabled=true
 ```

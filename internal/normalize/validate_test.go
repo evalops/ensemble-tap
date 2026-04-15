@@ -19,7 +19,7 @@ func TestValidateCloudEvent(t *testing.T) {
 	e := cloudevents.NewEvent()
 	e.SetSpecVersion(cloudevents.VersionV1)
 	e.SetID("evt_1")
-	e.SetType("siphon.hubspot.deal.updated")
+	e.SetType("siphon.tap.hubspot.deal.updated")
 	e.SetSource("tap/hubspot/default")
 	if err := e.SetData(cloudevents.ApplicationJSON, TapEventData{Provider: "hubspot", EntityType: "deal", EntityID: "1", Action: "updated"}); err != nil {
 		t.Fatalf("set data: %v", err)
@@ -38,7 +38,7 @@ func TestDecodeTapEventDataSupportsLegacyJSON(t *testing.T) {
 	e := cloudevents.NewEvent()
 	e.SetSpecVersion(cloudevents.VersionV1)
 	e.SetID("evt_json")
-	e.SetType("siphon.hubspot.deal.updated")
+	e.SetType("siphon.tap.hubspot.deal.updated")
 	e.SetSource("tap/hubspot/default")
 	if err := e.SetData(cloudevents.ApplicationJSON, TapEventData{
 		Provider:   "hubspot",

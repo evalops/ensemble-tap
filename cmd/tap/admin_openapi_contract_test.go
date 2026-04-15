@@ -38,7 +38,7 @@ func TestAdminOpenAPIContractMatchesRuntime(t *testing.T) {
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
 			Stream:        "SIPHON_CMD_TEST_OPENAPI",
-			SubjectPrefix: "siphon",
+			SubjectPrefix: "siphon.tap",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},

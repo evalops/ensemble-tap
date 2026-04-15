@@ -150,7 +150,7 @@ config:
   nats:
     url: nats://nats:4222
     stream: SIPHON
-    subject_prefix: siphon
+    subject_prefix: siphon.tap
     tenant_scoped_subjects: false
     max_age: 168h
     dedup_window: 2m
@@ -182,7 +182,7 @@ config:
     stream_max_msg_size: 0
   clickhouse:
     addr: ""
-    database: ensemble
+    database: siphon
     table: tap_events
     username: default
     password: ${CLICKHOUSE_PASSWORD}

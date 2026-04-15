@@ -22,7 +22,7 @@ func TestWebhookToNATSToClickHousePipeline(t *testing.T) {
 	natsCfg := config.NATSConfig{
 		URL:           s.ClientURL(),
 		Stream:        streamName,
-		SubjectPrefix: "siphon",
+		SubjectPrefix: "siphon.tap",
 		MaxAge:        time.Hour,
 		DedupWindow:   2 * time.Minute,
 	}

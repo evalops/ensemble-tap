@@ -14,7 +14,7 @@ on:
       namespace:
         description: Kubernetes namespace for smoke install
         required: false
-        default: ensemble-rc
+        default: siphon-rc
 
 permissions:
   contents: read

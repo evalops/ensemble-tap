@@ -348,7 +348,7 @@ const file_tap_v1_event_proto_rawDesc = "" +
 	" \x01(\v2\x17.google.protobuf.StructR\bsnapshot\x1aO\n" +
 	"\fChangesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12)\n" +
-	"\x05value\x18\x02 \x01(\v2\x13.tap.v1.FieldChangeR\x05value:\x028\x01B4Z2github.com/evalops/siphon/proto/tap/v1;tapv1b\x06proto3"
+	"\x05value\x18\x02 \x01(\v2\x13.tap.v1.FieldChangeR\x05value:\x028\x01B.Z,github.com/evalops/siphon/proto/tap/v1;tapv1b\x06proto3"
 
 var (
 	file_tap_v1_event_proto_rawDescOnce sync.Once
@@ -357,7 +357,6 @@ var (
 
 func file_tap_v1_event_proto_rawDescGZIP() []byte {
 	file_tap_v1_event_proto_rawDescOnce.Do(func() {
-		// #nosec G103 -- generated protobuf descriptor code uses unsafe internally.
 		file_tap_v1_event_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_tap_v1_event_proto_rawDesc), len(file_tap_v1_event_proto_rawDesc)))
 	})
 	return file_tap_v1_event_proto_rawDescData
@@ -400,7 +399,6 @@ func file_tap_v1_event_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			// #nosec G103 -- generated protobuf descriptor code uses unsafe internally.
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tap_v1_event_proto_rawDesc), len(file_tap_v1_event_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   5,

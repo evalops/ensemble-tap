@@ -1166,7 +1166,7 @@ const file_tap_v1_admin_proto_rawDesc = "" +
 	"\x10EnqueueReplayJob\x12\x1f.tap.v1.EnqueueReplayJobRequest\x1a .tap.v1.EnqueueReplayJobResponse\x12I\n" +
 	"\fGetReplayJob\x12\x1b.tap.v1.GetReplayJobRequest\x1a\x1c.tap.v1.GetReplayJobResponse\x12R\n" +
 	"\x0fCancelReplayJob\x12\x1e.tap.v1.CancelReplayJobRequest\x1a\x1f.tap.v1.CancelReplayJobResponse\x12R\n" +
-	"\x0fGetPollerStatus\x12\x1e.tap.v1.GetPollerStatusRequest\x1a\x1f.tap.v1.GetPollerStatusResponseB4Z2github.com/evalops/siphon/proto/tap/v1;tapv1b\x06proto3"
+	"\x0fGetPollerStatus\x12\x1e.tap.v1.GetPollerStatusRequest\x1a\x1f.tap.v1.GetPollerStatusResponseB.Z,github.com/evalops/siphon/proto/tap/v1;tapv1b\x06proto3"
 
 var (
 	file_tap_v1_admin_proto_rawDescOnce sync.Once
@@ -1175,7 +1175,6 @@ var (
 
 func file_tap_v1_admin_proto_rawDescGZIP() []byte {
 	file_tap_v1_admin_proto_rawDescOnce.Do(func() {
-		// #nosec G103 -- generated protobuf descriptor code uses unsafe internally.
 		file_tap_v1_admin_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_tap_v1_admin_proto_rawDesc), len(file_tap_v1_admin_proto_rawDesc)))
 	})
 	return file_tap_v1_admin_proto_rawDescData
@@ -1244,7 +1243,6 @@ func file_tap_v1_admin_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			// #nosec G103 -- generated protobuf descriptor code uses unsafe internally.
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tap_v1_admin_proto_rawDesc), len(file_tap_v1_admin_proto_rawDesc)),
 			NumEnums:      1,
 			NumMessages:   13,

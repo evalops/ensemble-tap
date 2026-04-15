@@ -63,7 +63,7 @@ func TestEventToRowSupportsLegacyJSONCloudEventData(t *testing.T) {
 	evt := cloudevents.NewEvent()
 	evt.SetSpecVersion(cloudevents.VersionV1)
 	evt.SetID("evt_legacy_json")
-	evt.SetType("siphon.acme.deal.updated")
+	evt.SetType("siphon.tap.acme.deal.updated")
 	evt.SetSource("tap/acme/default")
 	evt.SetSubject("deal/1")
 	evt.SetTime(time.Date(2026, 3, 3, 14, 22, 0, 0, time.UTC))
@@ -92,7 +92,7 @@ func TestEventToRowUsesCurrentTimeWhenCloudEventTimeMissing(t *testing.T) {
 	evt := cloudevents.NewEvent()
 	evt.SetSpecVersion(cloudevents.VersionV1)
 	evt.SetID("evt_no_time")
-	evt.SetType("siphon.acme.deal.updated")
+	evt.SetType("siphon.tap.acme.deal.updated")
 	evt.SetSource("tap/acme/default")
 	evt.SetSubject("deal/1")
 	if err := evt.SetData(cloudevents.ApplicationJSON, normalize.TapEventData{
@@ -129,7 +129,7 @@ func TestClickHouseSinkRetriesAfterInsertFailure(t *testing.T) {
 	natsCfg := config.NATSConfig{
 		URL:           s.ClientURL(),
 		Stream:        "SIPHON_CLICKHOUSE_RETRY",
-		SubjectPrefix: "siphon",
+		SubjectPrefix: "siphon.tap",
 		MaxAge:        time.Hour,
 		DedupWindow:   time.Minute,
 	}
@@ -301,7 +301,7 @@ func TestNewClickHouseSinkRejectsInvalidTLSFiles(t *testing.T) {
 		context.Background(),
 		config.ClickHouseConfig{
 			Addr:     "127.0.0.1:9000",
-			Database: "ensemble",
+			Database: "siphon",
 			Table:    "tap_events",
 			Secure:   true,
 			CAFile:   "/tmp/does-not-exist-ca.pem",
@@ -412,7 +412,7 @@ func TestInitSchemaExecutesDDL(t *testing.T) {
 	executed := make([]string, 0, 2)
 	sink := &ClickHouseSink{
 		cfg: config.ClickHouseConfig{
-			Database:     "ensemble",
+			Database:     "siphon",
 			Table:        "tap_events",
 			RetentionTTL: 24 * time.Hour,
 		},
@@ -430,17 +430,17 @@ func TestInitSchemaExecutesDDL(t *testing.T) {
 	if len(executed) != 2 {
 		t.Fatalf("expected 2 schema statements, got %d", len(executed))
 	}
-	if !strings.Contains(executed[0], "CREATE DATABASE IF NOT EXISTS ensemble") {
+	if !strings.Contains(executed[0], "CREATE DATABASE IF NOT EXISTS siphon") {
 		t.Fatalf("expected create database statement, got %q", executed[0])
 	}
-	if !strings.Contains(executed[1], "CREATE TABLE IF NOT EXISTS siphon_events") {
+	if !strings.Contains(executed[1], "CREATE TABLE IF NOT EXISTS siphon.tap_events") {
 		t.Fatalf("expected create table statement, got %q", executed[1])
 	}
 }
 
 func TestInitSchemaReturnsCreateDatabaseError(t *testing.T) {
 	sink := &ClickHouseSink{
-		cfg: config.ClickHouseConfig{Database: "ensemble", Table: "tap_events"},
+		cfg: config.ClickHouseConfig{Database: "siphon", Table: "tap_events"},
 		conn: &mockClickHouseConn{
 			execFn: func(_ context.Context, query string, _ ...any) error {
 				return fmt.Errorf("db exec failed")
@@ -463,10 +463,10 @@ func TestInsertRowsErrorsWhenNoConnectionConfigured(t *testing.T) {
 func TestInsertRowsUsesPreparedBatch(t *testing.T) {
 	batch := &mockBatch{}
 	sink := &ClickHouseSink{
-		cfg: config.ClickHouseConfig{Database: "ensemble", Table: "tap_events"},
+		cfg: config.ClickHouseConfig{Database: "siphon", Table: "tap_events"},
 		conn: &mockClickHouseConn{
 			prepareBatchFn: func(_ context.Context, query string, _ ...chdriver.PrepareBatchOption) (chdriver.Batch, error) {
-				if !strings.Contains(query, "INSERT INTO siphon_events") {
+				if !strings.Contains(query, "INSERT INTO siphon.tap_events") {
 					t.Fatalf("unexpected insert query: %q", query)
 				}
 				return batch, nil
@@ -477,7 +477,7 @@ func TestInsertRowsUsesPreparedBatch(t *testing.T) {
 	err := sink.insertRows(context.Background(), []clickhouseRow{
 		{
 			ID:              "evt_1",
-			Type:            "siphon.acme.deal.updated",
+			Type:            "siphon.tap.acme.deal.updated",
 			Source:          "tap/acme/default",
 			Subject:         "deal/1",
 			Time:            time.Now().UTC(),
@@ -552,10 +552,10 @@ func TestFilterDuplicateRowsInBatch(t *testing.T) {
 
 func TestFilterDuplicateRowsAgainstExistingIDs(t *testing.T) {
 	sink := &ClickHouseSink{
-		cfg: config.ClickHouseConfig{Database: "ensemble", Table: "tap_events"},
+		cfg: config.ClickHouseConfig{Database: "siphon", Table: "tap_events"},
 		conn: &mockClickHouseConn{
 			queryFn: func(_ context.Context, query string, _ ...any) (chdriver.Rows, error) {
-				if !strings.Contains(query, "SELECT id FROM siphon_events") {
+				if !strings.Contains(query, "SELECT id FROM siphon.tap_events") {
 					t.Fatalf("unexpected dedupe lookup query: %q", query)
 				}
 				return &mockRows{values: []string{"evt_2"}}, nil
@@ -583,7 +583,7 @@ func TestFilterDuplicateRowsAgainstExistingIDs(t *testing.T) {
 
 func TestFilterDuplicateRowsReturnsLookupError(t *testing.T) {
 	sink := &ClickHouseSink{
-		cfg: config.ClickHouseConfig{Database: "ensemble", Table: "tap_events"},
+		cfg: config.ClickHouseConfig{Database: "siphon", Table: "tap_events"},
 		conn: &mockClickHouseConn{
 			queryFn: func(_ context.Context, _ string, _ ...any) (chdriver.Rows, error) {
 				return nil, fmt.Errorf("lookup failed")
@@ -599,11 +599,11 @@ func TestFilterDuplicateRowsReturnsLookupError(t *testing.T) {
 func TestLoadExistingRowIDsChunkingAndErrors(t *testing.T) {
 	calls := 0
 	sink := &ClickHouseSink{
-		cfg: config.ClickHouseConfig{Database: "ensemble", Table: "tap_events"},
+		cfg: config.ClickHouseConfig{Database: "siphon", Table: "tap_events"},
 		conn: &mockClickHouseConn{
 			queryFn: func(_ context.Context, query string, _ ...any) (chdriver.Rows, error) {
 				calls++
-				if !strings.Contains(query, "SELECT id FROM siphon_events WHERE id IN (") {
+				if !strings.Contains(query, "SELECT id FROM siphon.tap_events WHERE id IN (") {
 					t.Fatalf("unexpected query: %q", query)
 				}
 				return &mockRows{values: []string{"evt_existing"}}, nil
@@ -690,7 +690,7 @@ func TestFallbackEventIDFromPayloadDeterministic(t *testing.T) {
 func TestEventToRowFallbackIDPriority(t *testing.T) {
 	withProviderEventID := []byte(`{
   "specversion":"1.0",
-  "type":"siphon.acme.deal.updated",
+  "type":"siphon.tap.acme.deal.updated",
   "source":"tap/acme/default",
   "subject":"deal/1",
   "data":{
@@ -711,7 +711,7 @@ func TestEventToRowFallbackIDPriority(t *testing.T) {
 
 	withoutIDs := []byte(`{
   "specversion":"1.0",
-  "type":"siphon.acme.deal.updated",
+  "type":"siphon.tap.acme.deal.updated",
   "source":"tap/acme/default",
   "subject":"deal/1",
   "data":{

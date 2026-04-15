@@ -2,7 +2,7 @@
 set -euo pipefail
 
 release="siphon"
-namespace="ensemble"
+namespace="siphon"
 chart_path="./charts/siphon"
 values_file="./values.onboarding.yaml"
 secret_name=""
@@ -24,7 +24,7 @@ Guided Helm bootstrap for the fastest path to first event.
 
 Options:
   --release <name>           Helm release name (default: siphon)
-  --namespace <name>         Kubernetes namespace (default: ensemble)
+  --namespace <name>         Kubernetes namespace (default: siphon)
   --chart <path>             Helm chart path (default: ./charts/siphon)
   --values-file <path>       Generated values file (default: ./values.onboarding.yaml)
   --secret-name <name>       Kubernetes secret name (default: <release>-onboarding-secrets)

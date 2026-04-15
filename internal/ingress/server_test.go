@@ -40,7 +40,7 @@ func (f *fakePublisher) Publish(_ context.Context, event cloudevents.Event, dedu
 	if f.subject != "" {
 		return f.subject, nil
 	}
-	return "siphon.test.event.updated", nil
+	return "siphon.tap.test.event.updated", nil
 }
 
 type fakeDLQRecorder struct {
@@ -56,7 +56,7 @@ func TestServerAcceptsGenericWebhook(t *testing.T) {
 	secret := "super-secret"
 	body := []byte(`{"id":"invoice_42","timestamp":"2026-03-03T14:22:00Z","amount":1200}`)
 
-	pub := &fakePublisher{subject: "siphon.acme.invoice.paid"}
+	pub := &fakePublisher{subject: "siphon.tap.acme.invoice.paid"}
 	srv := newTestServer(map[string]config.ProviderConfig{
 		"acme": {Secret: secret, TenantID: "tenant-42"},
 	}, pub)
@@ -87,7 +87,7 @@ func TestServerAcceptsGenericWebhook(t *testing.T) {
 	if resp["status"] != "accepted" {
 		t.Fatalf("unexpected status payload: %#v", resp)
 	}
-	if resp["subject"] != "siphon.acme.invoice.paid" {
+	if resp["subject"] != "siphon.tap.acme.invoice.paid" {
 		t.Fatalf("unexpected subject payload: %#v", resp)
 	}
 	if resp["id"] != "evt_123" {

@@ -241,7 +241,7 @@ func (c *Config) ApplyDefaults() {
 		c.NATS.Stream = "SIPHON"
 	}
 	if c.NATS.SubjectPrefix == "" {
-		c.NATS.SubjectPrefix = "siphon"
+		c.NATS.SubjectPrefix = "siphon.tap"
 	}
 	if c.NATS.MaxAge == 0 {
 		c.NATS.MaxAge = 7 * 24 * time.Hour
@@ -280,7 +280,7 @@ func (c *Config) ApplyDefaults() {
 		c.NATS.StreamCompression = defaultNATSStreamCompression
 	}
 	if c.ClickHouse.Database == "" {
-		c.ClickHouse.Database = "ensemble"
+		c.ClickHouse.Database = "siphon"
 	}
 	if c.ClickHouse.Table == "" {
 		c.ClickHouse.Table = "tap_events"

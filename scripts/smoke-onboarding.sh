@@ -2,7 +2,7 @@
 set -euo pipefail
 
 release="siphon"
-namespace="ensemble"
+namespace="siphon"
 provider=""
 provider_secret=""
 service_name=""
@@ -22,7 +22,7 @@ Options:
   --provider <name>         Provider name used in /webhooks/{provider}.
   --secret <value>          Provider webhook secret.
   --release <name>          Helm release name (default: siphon).
-  --namespace <name>        Kubernetes namespace (default: ensemble).
+  --namespace <name>        Kubernetes namespace (default: siphon).
   --service <name>          Kubernetes Service name (auto-discovered by default).
   --service-port <port>     Service HTTP port (default: 8080).
   --local-port <port>       Local port for kubectl port-forward (default: 18080).

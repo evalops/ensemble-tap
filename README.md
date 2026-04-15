@@ -77,7 +77,7 @@ What it does:
 Run smoke test only (for an existing install):
 
 ```bash
-./scripts/smoke-onboarding.sh --provider generic --release siphon --namespace ensemble --secret '<your-secret>'
+./scripts/smoke-onboarding.sh --provider generic --release siphon --namespace siphon --secret '<your-secret>'
 ```
 
 ## Local Development
@@ -242,7 +242,7 @@ Install with Helm:
 
 ```bash
 helm upgrade --install siphon ./charts/siphon \
-  --namespace ensemble \
+  --namespace siphon \
   --create-namespace
 ```
 

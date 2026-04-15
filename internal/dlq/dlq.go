@@ -44,8 +44,8 @@ func NewPublisher(ctx context.Context, natsCfg config.NATSConfig, js nats.JetStr
 		js:       js,
 		natsCfg:  natsCfg,
 		stream:   natsCfg.Stream + "_DLQ",
-		base:     "ensemble.dlq",
-		subject:  "ensemble.dlq.>",
+		base:     "siphon.dlq",
+		subject:  "siphon.dlq.>",
 		consumer: "tap_dlq_replay",
 	}
 	if err := p.ensureStream(ctx); err != nil {

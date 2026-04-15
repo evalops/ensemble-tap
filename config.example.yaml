@@ -110,7 +110,7 @@ providers:
 nats:
   url: nats://localhost:4222
   stream: SIPHON
-  subject_prefix: siphon
+  subject_prefix: siphon.tap
   tenant_scoped_subjects: false
   max_age: 168h
   dedup_window: 2m
@@ -143,7 +143,7 @@ nats:
 
 clickhouse:
   addr: clickhouse:9000
-  database: ensemble
+  database: siphon
   table: tap_events
   username: default
   password: ${CLICKHOUSE_PASSWORD}

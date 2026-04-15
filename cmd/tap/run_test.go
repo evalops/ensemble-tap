@@ -36,7 +36,7 @@ func TestRunStartsAndStopsWithReadyLifecycle(t *testing.T) {
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
 			Stream:        "SIPHON_CMD_TEST",
-			SubjectPrefix: "siphon",
+			SubjectPrefix: "siphon.tap",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},
@@ -90,7 +90,7 @@ func TestRunReadinessReflectsNATSDisconnect(t *testing.T) {
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
 			Stream:        "SIPHON_CMD_TEST_READY",
-			SubjectPrefix: "siphon",
+			SubjectPrefix: "siphon.tap",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},
@@ -271,7 +271,7 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
 			Stream:        "SIPHON_CMD_TEST_REPLAY",
-			SubjectPrefix: "siphon",
+			SubjectPrefix: "siphon.tap",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},
@@ -378,7 +378,7 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 		t.Fatalf("jetstream context: %v", err)
 	}
 
-	subject := "siphon.replay.test.updated"
+	subject := "siphon.tap.replay.test.updated"
 	payload := []byte(`{"id":"replay_1"}`)
 	rec := dlq.Record{
 		Stage:           "publish",
@@ -393,7 +393,7 @@ func TestRunAdminReplayEndpointRequiresToken(t *testing.T) {
 		t.Fatalf("marshal dlq record: %v", err)
 	}
 	msg := &nats.Msg{
-		Subject: "ensemble.dlq.publish.test",
+		Subject: "siphon.dlq.publish.test",
 		Data:    data,
 		Header:  nats.Header{},
 	}
@@ -949,7 +949,7 @@ func TestRunAdminPollerStatusEndpoint(t *testing.T) {
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
 			Stream:        "SIPHON_CMD_TEST_POLLER_STATUS",
-			SubjectPrefix: "siphon",
+			SubjectPrefix: "siphon.tap",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},
@@ -1223,7 +1223,7 @@ func TestRunAdminReplayEndpointAllowlistAndMTLS(t *testing.T) {
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
 			Stream:        "SIPHON_CMD_TEST_ADMIN_MTLS",
-			SubjectPrefix: "siphon",
+			SubjectPrefix: "siphon.tap",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},
@@ -1349,7 +1349,7 @@ func TestRunAdminEndpointsRoleScopedTokens(t *testing.T) {
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
 			Stream:        "SIPHON_CMD_TEST_ADMIN_ROLE_SCOPES",
-			SubjectPrefix: "siphon",
+			SubjectPrefix: "siphon.tap",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},
@@ -1538,7 +1538,7 @@ func TestRunAdminReplayUnderContention(t *testing.T) {
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
 			Stream:        "SIPHON_CMD_TEST_REPLAY_CONTENTION",
-			SubjectPrefix: "siphon",
+			SubjectPrefix: "siphon.tap",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},
@@ -1581,7 +1581,7 @@ func TestRunAdminReplayUnderContention(t *testing.T) {
 			Stage:           "publish",
 			Provider:        "test",
 			Reason:          "contention replay test",
-			OriginalSubject: "siphon.replay.contention.updated",
+			OriginalSubject: "siphon.tap.replay.contention.updated",
 			OriginalDedupID: fmt.Sprintf("contention_%d", i),
 			OriginalPayload: []byte(fmt.Sprintf(`{"id":"contention_%d"}`, i)),
 		}
@@ -1590,7 +1590,7 @@ func TestRunAdminReplayUnderContention(t *testing.T) {
 			t.Fatalf("marshal dlq record: %v", err)
 		}
 		msg := &nats.Msg{
-			Subject: "ensemble.dlq.publish.test",
+			Subject: "siphon.dlq.publish.test",
 			Data:    data,
 			Header:  nats.Header{},
 		}
@@ -1713,7 +1713,7 @@ func TestRunAdminEndpointsRateLimited(t *testing.T) {
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
 			Stream:        "SIPHON_CMD_TEST_ADMIN_RATELIMIT",
-			SubjectPrefix: "siphon",
+			SubjectPrefix: "siphon.tap",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},

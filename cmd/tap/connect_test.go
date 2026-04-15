@@ -21,7 +21,7 @@ func TestTapAdminConnectReplayLifecycleAndIdempotency(t *testing.T) {
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
 			Stream:        "SIPHON_CMD_TEST_CONNECT_REPLAY",
-			SubjectPrefix: "siphon",
+			SubjectPrefix: "siphon.tap",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},
@@ -134,7 +134,7 @@ func TestTapAdminConnectRoleScopedTokens(t *testing.T) {
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
 			Stream:        "SIPHON_CMD_TEST_CONNECT_ROLE_SCOPES",
-			SubjectPrefix: "siphon",
+			SubjectPrefix: "siphon.tap",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},
@@ -250,7 +250,7 @@ func TestTapAdminConnectPreservesAllowlistAndMTLS(t *testing.T) {
 		NATS: config.NATSConfig{
 			URL:           s.ClientURL(),
 			Stream:        "SIPHON_CMD_TEST_CONNECT_MTLS",
-			SubjectPrefix: "siphon",
+			SubjectPrefix: "siphon.tap",
 			MaxAge:        time.Hour,
 			DedupWindow:   time.Minute,
 		},

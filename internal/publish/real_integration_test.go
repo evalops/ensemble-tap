@@ -28,7 +28,7 @@ func TestRealNATSClickHousePipeline(t *testing.T) {
 	natsCfg := config.NATSConfig{
 		URL:           natsURL,
 		Stream:        streamName,
-		SubjectPrefix: "siphon",
+		SubjectPrefix: "siphon.tap",
 		MaxAge:        time.Hour,
 		DedupWindow:   time.Minute,
 	}
@@ -41,7 +41,7 @@ func TestRealNATSClickHousePipeline(t *testing.T) {
 	table := fmt.Sprintf("tap_events_it_%d", time.Now().UnixNano())
 	clickCfg := config.ClickHouseConfig{
 		Addr:          clickhouseAddr,
-		Database:      "ensemble",
+		Database:      "siphon",
 		Table:         table,
 		BatchSize:     1,
 		FlushInterval: 200 * time.Millisecond,
@@ -72,7 +72,7 @@ func TestRealNATSClickHousePipeline(t *testing.T) {
 		t.Fatalf("publish event: %v", err)
 	}
 
-	conn, err := clickhouse.Open(&clickhouse.Options{Addr: []string{clickhouseAddr}, Auth: clickhouse.Auth{Database: "ensemble"}})
+	conn, err := clickhouse.Open(&clickhouse.Options{Addr: []string{clickhouseAddr}, Auth: clickhouse.Auth{Database: "siphon"}})
 	if err != nil {
 		t.Fatalf("open clickhouse conn: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestRealNATSClickHousePipeline(t *testing.T) {
 	deadline := time.Now().Add(20 * time.Second)
 	retryAttempt := 0
 	for time.Now().Before(deadline) {
-		query := fmt.Sprintf("SELECT count() FROM ensemble.%s WHERE id='evt_it_1'", table)
+		query := fmt.Sprintf("SELECT count() FROM siphon.%s WHERE id='evt_it_1'", table)
 		if err := conn.QueryRow(ctx, query).Scan(&count); err == nil && count >= 1 {
 			return
 		}

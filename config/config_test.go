@@ -804,7 +804,7 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:           "nats://localhost:4222",
 					Stream:        "SIPHON",
-					SubjectPrefix: "siphon",
+					SubjectPrefix: "siphon.tap",
 					MaxAge:        time.Minute,
 					DedupWindow:   2 * time.Minute,
 				},
@@ -817,7 +817,7 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:           "nats://localhost:4222",
 					Stream:        "SIPHON",
-					SubjectPrefix: "siphon",
+					SubjectPrefix: "siphon.tap",
 					Password:      "secret",
 				},
 			},
@@ -829,7 +829,7 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:           "nats://localhost:4222",
 					Stream:        "SIPHON",
-					SubjectPrefix: "siphon",
+					SubjectPrefix: "siphon.tap",
 					CredsFile:     "/tmp/nats.creds",
 					Token:         "nats-token",
 				},
@@ -842,7 +842,7 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:           "http://localhost:4222",
 					Stream:        "SIPHON",
-					SubjectPrefix: "siphon",
+					SubjectPrefix: "siphon.tap",
 				},
 			},
 			wantErrSub: "unsupported scheme",
@@ -853,7 +853,7 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:           "nats://localhost:4222,",
 					Stream:        "SIPHON",
-					SubjectPrefix: "siphon",
+					SubjectPrefix: "siphon.tap",
 				},
 			},
 			wantErrSub: "contains empty endpoint",
@@ -864,7 +864,7 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:           "nats://localhost:70000",
 					Stream:        "SIPHON",
-					SubjectPrefix: "siphon",
+					SubjectPrefix: "siphon.tap",
 				},
 			},
 			wantErrSub: "invalid port",
@@ -875,7 +875,7 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:                "nats://localhost:4222",
 					Stream:             "SIPHON",
-					SubjectPrefix:      "siphon",
+					SubjectPrefix: "siphon.tap",
 					InsecureSkipVerify: true,
 				},
 			},
@@ -887,7 +887,7 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:           "nats://localhost:4222",
 					Stream:        "SIPHON",
-					SubjectPrefix: "siphon",
+					SubjectPrefix: "siphon.tap",
 					Secure:        true,
 					CertFile:      "/var/run/secrets/nats/client.crt",
 				},
@@ -900,7 +900,7 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:              "nats://localhost:4222",
 					Stream:           "SIPHON",
-					SubjectPrefix:    "siphon",
+					SubjectPrefix: "siphon.tap",
 					StreamMaxMsgSize: 2147483648,
 				},
 			},
@@ -912,7 +912,7 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:           "nats://localhost:4222",
 					Stream:        "SIPHON",
-					SubjectPrefix: "siphon",
+					SubjectPrefix: "siphon.tap",
 				},
 				ClickHouse: ClickHouseConfig{
 					Addr:               "clickhouse:9000",
@@ -927,7 +927,7 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:           "nats://localhost:4222",
 					Stream:        "SIPHON",
-					SubjectPrefix: "siphon",
+					SubjectPrefix: "siphon.tap",
 				},
 				ClickHouse: ClickHouseConfig{
 					Addr:          "clickhouse:9000",
@@ -942,14 +942,14 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:           "nats://localhost:4222",
 					Stream:        "SIPHON",
-					SubjectPrefix: "siphon",
+					SubjectPrefix: "siphon.tap",
 				},
 				ClickHouse: ClickHouseConfig{
 					Addr:                  "clickhouse:9000",
 					Secure:                true,
 					CertFile:              "/var/run/secrets/clickhouse/client.crt",
 					ConsumerName:          "tap_clickhouse_sink",
-					Database:              "ensemble",
+					Database:              "siphon",
 					Table:                 "tap_events",
 					Username:              "default",
 					DialTimeout:           5 * time.Second,
@@ -973,7 +973,7 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:           "nats://localhost:4222",
 					Stream:        "SIPHON",
-					SubjectPrefix: "siphon",
+					SubjectPrefix: "siphon.tap",
 				},
 				ClickHouse: ClickHouseConfig{
 					Addr: "clickhouse",
@@ -987,7 +987,7 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:           "nats://localhost:4222",
 					Stream:        "SIPHON",
-					SubjectPrefix: "siphon",
+					SubjectPrefix: "siphon.tap",
 				},
 				ClickHouse: ClickHouseConfig{
 					Addr: "clickhouse:70000",
@@ -1001,14 +1001,14 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:           "nats://localhost:4222",
 					Stream:        "SIPHON",
-					SubjectPrefix: "siphon",
+					SubjectPrefix: "siphon.tap",
 				},
 				ClickHouse: ClickHouseConfig{
 					Addr:                  "clickhouse:9000",
 					ConsumerAckWait:       30 * time.Second,
 					InsertTimeout:         30 * time.Second,
 					ConsumerName:          "tap_clickhouse_sink",
-					Database:              "ensemble",
+					Database:              "siphon",
 					Table:                 "tap_events",
 					Username:              "default",
 					DialTimeout:           5 * time.Second,
@@ -1030,7 +1030,7 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:           "nats://localhost:4222",
 					Stream:        "SIPHON",
-					SubjectPrefix: "siphon",
+					SubjectPrefix: "siphon.tap",
 				},
 				ClickHouse: ClickHouseConfig{
 					Addr:                 "clickhouse:9000",
@@ -1046,7 +1046,7 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:           "nats://localhost:4222",
 					Stream:        "SIPHON",
-					SubjectPrefix: "siphon",
+					SubjectPrefix: "siphon.tap",
 				},
 				ClickHouse: ClickHouseConfig{
 					Addr:            "clickhouse:9000",
@@ -1062,7 +1062,7 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:           "nats://localhost:4222",
 					Stream:        "SIPHON",
-					SubjectPrefix: "siphon",
+					SubjectPrefix: "siphon.tap",
 				},
 				ClickHouse: ClickHouseConfig{
 					Addr:            "clickhouse:9000",
@@ -1079,12 +1079,12 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:           "nats://localhost:4222",
 					Stream:        "SIPHON",
-					SubjectPrefix: "siphon",
+					SubjectPrefix: "siphon.tap",
 				},
 				ClickHouse: ClickHouseConfig{
 					Addr:                  "clickhouse:9000",
 					ConsumerName:          "tap clickhouse sink",
-					Database:              "ensemble",
+					Database:              "siphon",
 					Table:                 "tap_events",
 					Username:              "default",
 					DialTimeout:           5 * time.Second,
@@ -1108,7 +1108,7 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				NATS: NATSConfig{
 					URL:                 "nats://localhost:4222",
 					Stream:              "SIPHON",
-					SubjectPrefix:       "siphon",
+					SubjectPrefix: "siphon.tap",
 					MaxAge:              24 * time.Hour,
 					DedupWindow:         time.Minute,
 					ConnectTimeout:      5 * time.Second,
@@ -1130,7 +1130,7 @@ func TestConfigValidateNATSAndClickHouseRules(t *testing.T) {
 				},
 				ClickHouse: ClickHouseConfig{
 					Addr:                  "clickhouse-a:9000,clickhouse-b:9000",
-					Database:              "ensemble",
+					Database:              "siphon",
 					Table:                 "tap_events",
 					Username:              "default",
 					Password:              "secret",
@@ -1310,7 +1310,7 @@ func TestConfigValidateAdvancedNATSAndClickHouseControls(t *testing.T) {
 			NATS: NATSConfig{
 				URL:                 "nats://localhost:4222",
 				Stream:              "SIPHON",
-				SubjectPrefix:       "siphon",
+				SubjectPrefix: "siphon.tap",
 				MaxAge:              24 * time.Hour,
 				DedupWindow:         time.Minute,
 				ConnectTimeout:      5 * time.Second,
@@ -1326,7 +1326,7 @@ func TestConfigValidateAdvancedNATSAndClickHouseControls(t *testing.T) {
 			},
 			ClickHouse: ClickHouseConfig{
 				Addr:                  "clickhouse:9000",
-				Database:              "ensemble",
+				Database:              "siphon",
 				Table:                 "tap_events",
 				Username:              "default",
 				DialTimeout:           5 * time.Second,
