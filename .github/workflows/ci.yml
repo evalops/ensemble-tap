@@ -23,7 +23,7 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -61,7 +61,7 @@ jobs:
           path: coverage.out
 
   staticcheck:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -98,7 +98,7 @@ jobs:
           "${TOOLS_BIN}/staticcheck" ./...
 
   openapi-contract:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -113,7 +113,7 @@ jobs:
         run: go test ./cmd/tap -run TestAdminOpenAPIContractMatchesRuntime -count=1
 
   config-lint:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -144,7 +144,7 @@ jobs:
         run: ./scripts/assert-chart-render.sh
 
   docker-build:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -156,7 +156,7 @@ jobs:
           tags: siphon:ci
 
   helm-lint:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -171,7 +171,7 @@ jobs:
         run: helm template siphon charts/siphon >/dev/null
 
   security-gosec:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -208,7 +208,7 @@ jobs:
           "${TOOLS_BIN}/gosec" -exclude=G117 -exclude-dir=proto ./...
 
   security-govulncheck:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -246,7 +246,7 @@ jobs:
           "${TOOLS_BIN}/govulncheck" -mode=binary ./bin/siphon
 
   security-trivy:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     env:
       TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db
@@ -266,7 +266,7 @@ jobs:
           exit-code: '1'
 
   security-sbom:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -285,7 +285,7 @@ jobs:
           path: sbom-source.spdx.json
 
   perf-smoke:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     env:
       TAP_SERVER_PORT: "18080"
@@ -364,7 +364,7 @@ jobs:
           docker rm -f tap-nats || true
 
   integration:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -432,7 +432,7 @@ jobs:
     needs:
       - integration
       - perf-smoke
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       actions: read
       contents: read
@@ -473,7 +473,7 @@ jobs:
       - security-sbom
       - perf-smoke
       - integration
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       actions: read
       contents: read
