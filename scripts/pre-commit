@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Pre-commit hook for siphon.
+# Install: git config core.hooksPath scripts  (or symlink scripts/pre-commit → .git/hooks/pre-commit)
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACM)
+
+# ─── Guard: no "ensemble-tap" / "ensemble.tap" reintroduction ───
+if echo "$STAGED" | xargs grep -l 'ensemble-tap\|ensemble\.tap\|ENSEMBLE_TAP' 2>/dev/null; then
+  echo "error: staged files contain legacy 'ensemble-tap' references — rename to 'siphon'"
+  exit 1
+fi
+
+# ─── Proto drift: generated .pb.go must match .proto source ───
+PROTO_CHANGED=$(echo "$STAGED" | grep '\.proto$' || true)
+if [ -n "$PROTO_CHANGED" ]; then
+  if command -v buf >/dev/null 2>&1; then
+    echo "Proto files changed — regenerating with buf..."
+    buf generate
+    PROTO_DRIFT=$(git diff --name-only -- 'proto/**/*.pb.go' 'proto/**/*connect.go' || true)
+    if [ -n "$PROTO_DRIFT" ]; then
+      echo "error: proto generated code is out of sync after buf generate:"
+      echo "$PROTO_DRIFT"
+      echo "Stage the regenerated files and retry."
+      exit 1
+    fi
+  else
+    echo "warning: .proto files changed but buf is not installed — skipping regeneration check"
+  fi
+fi
+
+# ─── Go checks on staged files ───
+GO_STAGED=$(echo "$STAGED" | grep '\.go$' || true)
+if [ -n "$GO_STAGED" ]; then
+  # Stash unstaged changes so checks run against exactly what will be committed.
+  STASH_NAME="pre-commit-$(date +%s)"
+  git stash push -q --keep-index -m "$STASH_NAME"
+  trap 'git stash pop -q 2>/dev/null || true' EXIT
+
+  echo "Running go vet..."
+  go vet ./...
+
+  echo "Running tests (short mode)..."
+  go test -short ./...
+fi

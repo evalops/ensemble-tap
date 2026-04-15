@@ -3,7 +3,7 @@ MIN_COVERAGE ?= 75
 STATICCHECK_VERSION ?= v0.6.1
 STATICCHECK_BIN := $(shell $(GO) env GOPATH)/bin/staticcheck
 
-.PHONY: ci-local test race vet staticcheck staticcheck-install coverage openapi proto config-lint chart-assert helm-lint helm-template onboard onboard-smoke
+.PHONY: ci-local test race vet staticcheck staticcheck-install coverage openapi proto config-lint chart-assert helm-lint helm-template onboard onboard-smoke setup-hooks proto-check
 
 ci-local: vet test race staticcheck coverage openapi config-lint chart-assert helm-lint helm-template
 
@@ -38,6 +38,19 @@ openapi:
 
 proto:
 	buf generate
+
+proto-check: proto
+	@if git diff --quiet -- 'proto/**/*.pb.go' 'proto/**/*connect.go'; then \
+		echo "ok: generated proto code is up to date"; \
+	else \
+		echo "error: proto generated code is stale — run 'make proto' and commit"; \
+		git diff --stat -- 'proto/**/*.pb.go' 'proto/**/*connect.go'; \
+		exit 1; \
+	fi
+
+setup-hooks:
+	git config core.hooksPath scripts
+	@echo "ok: git hooks configured to use scripts/"
 
 config-lint:
 	./scripts/lint-config.sh

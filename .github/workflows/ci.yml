@@ -205,7 +205,7 @@ jobs:
 
       - name: Run gosec
         run: |
-          "${TOOLS_BIN}/gosec" -exclude=G117 ./...
+          "${TOOLS_BIN}/gosec" -exclude=G117 -exclude-dir=proto ./...
 
   security-govulncheck:
     runs-on: ubuntu-latest
