@@ -1,0 +1,47 @@
+
+name: Proto Bump
+
+on:
+  repository_dispatch:
+    types: [proto-bump]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+
+      - name: Bump proto
+        env:
+          TAG: ${{ github.event.client_payload.tag }}
+          BRANCH: ${{ github.event.client_payload.branch }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git checkout -b "$BRANCH"
+
+          go get "github.com/evalops/proto@${TAG}"
+          go mod tidy
+
+          if git diff --quiet go.mod go.sum; then
+            echo "No changes needed — already on ${TAG}"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add go.mod go.sum
+          git commit -m "Bump proto to ${TAG}"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "Bump proto to ${TAG}" \
+            --body "Automated proto dependency update to \`${TAG}\`."$'\n\n'"Triggered by new tag in [evalops/proto](https://github.com/evalops/proto/releases/tag/${TAG})." \
+            --base main
