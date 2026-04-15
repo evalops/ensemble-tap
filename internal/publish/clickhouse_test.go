@@ -820,6 +820,8 @@ func (m *mockRows) Totals(...any) error { return nil }
 
 func (m *mockRows) Columns() []string { return []string{"id"} }
 
+func (m *mockRows) HasData() bool { return len(m.values) > 0 }
+
 func (m *mockRows) Close() error { return m.closeErr }
 
 func (m *mockRows) Err() error { return m.err }
