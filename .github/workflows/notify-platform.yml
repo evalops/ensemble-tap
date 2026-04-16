@@ -9,17 +9,16 @@ permissions:
 
 jobs:
   dispatch:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Dispatch sync to platform
         env:
           GH_TOKEN: ${{ secrets.ADMIN_CONTROL_PLANE_SYNC_TOKEN || secrets.GH_BOT_TOKEN || secrets.PAT }}
         run: |
-          if [ -z "${GH_TOKEN}" ]; then
-            echo "::error::Set ADMIN_CONTROL_PLANE_SYNC_TOKEN, GH_BOT_TOKEN, or PAT to dispatch to evalops/platform."
+          if [[ -z "${GH_TOKEN}" ]]; then
+            echo "::error::No cross-repo token configured. Set ADMIN_CONTROL_PLANE_SYNC_TOKEN, GH_BOT_TOKEN, or PAT in repo secrets."
             exit 1
           fi
-
           service="${GITHUB_REPOSITORY#*/}"
           gh api repos/evalops/platform/dispatches \
             -X POST \
