@@ -185,6 +185,7 @@ Auth notes:
 - `config.nats.stream_compression` supports `none|s2`; `config.nats.stream_max_consumers` and `config.nats.stream_max_msgs_per_subject` must be `>= 0`.
 - `config.clickhouse.consumer_backoff` values must be positive and non-decreasing; when `config.clickhouse.consumer_max_deliver > 0`, it must equal the backoff list length.
 - Keep `config.clickhouse.consumer_fetch_max_wait < config.clickhouse.consumer_ack_wait` and `config.clickhouse.insert_timeout + config.clickhouse.flush_interval < config.clickhouse.consumer_ack_wait`.
+- `config.server.shutdown_timeout` controls how long the tap server waits for in-flight work to drain before forcing HTTP shutdown.
 
 ## Ops hardening defaults
 
@@ -197,6 +198,7 @@ Auth notes:
 - `networkPolicy.natsEgressTo=[]` and `networkPolicy.clickhouseEgressTo=[]` optionally scope derived transport rules to destination selectors (`namespaceSelector`, `podSelector`, `ipBlock`) for least-privilege egress.
 - `envSecrets` supports direct `env` values from secret key references.
 - `autoscaling.customMetrics` enables HPA custom metrics in addition to CPU/memory targets.
+- `values-production.yaml` enables HPA by default for production installs (`minReplicas=2`, CPU+memory targets enabled).
 
 Example selector-based transport policy:
 
@@ -207,6 +209,14 @@ helm upgrade --install siphon ./charts/siphon \
   --set networkPolicy.natsEgressTo[0].namespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name=messaging \
   --set networkPolicy.natsEgressTo[0].podSelector.matchLabels.app=nats \
   --set networkPolicy.clickhouseEgressTo[0].ipBlock.cidr=10.42.0.0/16
+```
+
+## Production profile
+
+```bash
+helm upgrade --install siphon ./charts/siphon \
+  --namespace siphon \
+  -f ./charts/siphon/values-production.yaml
 ```
 
 ## Enable sqlite state persistence

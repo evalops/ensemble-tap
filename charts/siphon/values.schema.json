@@ -638,6 +638,10 @@
               "type": "string",
               "description": "HTTP server write timeout."
             },
+            "shutdown_timeout": {
+              "type": "string",
+              "description": "HTTP server shutdown grace timeout."
+            },
             "max_body_size": {
               "type": "integer",
               "minimum": 1,

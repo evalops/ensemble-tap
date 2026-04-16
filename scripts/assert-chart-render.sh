@@ -26,9 +26,10 @@ rendered_default="$(mktemp)"
 rendered_fixture="$(mktemp)"
 rendered_automount="$(mktemp)"
 rendered_startup_disabled="$(mktemp)"
+rendered_production="$(mktemp)"
 fixture_values="$(mktemp)"
 cleanup() {
-  rm -f "${rendered_default}" "${rendered_fixture}" "${rendered_automount}" "${rendered_startup_disabled}" "${fixture_values}"
+  rm -f "${rendered_default}" "${rendered_fixture}" "${rendered_automount}" "${rendered_startup_disabled}" "${rendered_production}" "${fixture_values}"
 }
 trap cleanup EXIT
 
@@ -65,6 +66,7 @@ helm template siphon charts/siphon >"${rendered_default}"
 helm template siphon charts/siphon -f "${fixture_values}" >"${rendered_fixture}"
 helm template siphon charts/siphon --set serviceAccount.automount=true >"${rendered_automount}"
 helm template siphon charts/siphon --set startupProbe.enabled=false >"${rendered_startup_disabled}"
+helm template siphon charts/siphon -f charts/siphon/values-production.yaml >"${rendered_production}"
 
 default_automount="$(yq -r 'select(.kind == "Deployment") | .spec.template.spec.automountServiceAccountToken' "${rendered_default}")"
 [[ "${default_automount}" == "false" ]] || fail "default automountServiceAccountToken should be false, got ${default_automount}"
@@ -92,5 +94,11 @@ startup_path="$(yq -r 'select(.kind == "Deployment") | .spec.template.spec.conta
 
 startup_disabled="$(yq -r 'select(.kind == "Deployment") | .spec.template.spec.containers[] | select(.name == "tap") | has("startupProbe")' "${rendered_startup_disabled}")"
 [[ "${startup_disabled}" == "false" ]] || fail "startupProbe should be omitted when startupProbe.enabled=false, got ${startup_disabled}"
+
+production_hpa="$(yq -r 'select(.kind == "HorizontalPodAutoscaler") | .kind' "${rendered_production}")"
+[[ "${production_hpa}" == "HorizontalPodAutoscaler" ]] || fail "production profile should render an HPA, got ${production_hpa}"
+
+production_replicas="$(yq -r 'select(.kind == "Deployment") | .spec | has("replicas")' "${rendered_production}" | head -n1)"
+[[ "${production_replicas}" == "false" ]] || fail "production profile should omit deployment replicas when autoscaling is enabled, got ${production_replicas}"
 
 echo "ok: chart render assertions passed"
