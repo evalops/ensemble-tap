@@ -35,6 +35,7 @@ server:
 
 	t.Setenv("STRIPE_WEBHOOK_SECRET", "whsec_123")
 	t.Setenv("TAP_SERVER_PORT", "9091")
+	t.Setenv("TAP_SERVER_SHUTDOWN_TIMEOUT", "17s")
 
 	cfg, err := Load(path)
 	if err != nil {
@@ -42,6 +43,9 @@ server:
 	}
 	if got := cfg.Server.Port; got != 9091 {
 		t.Fatalf("expected env override port 9091, got %d", got)
+	}
+	if got := cfg.Server.ShutdownTimeout; got != 17*time.Second {
+		t.Fatalf("expected env override shutdown timeout 17s, got %s", got)
 	}
 	if cfg.Providers["stripe"].Secret != "whsec_123" {
 		t.Fatalf("expected secret expansion")
@@ -178,6 +182,9 @@ func TestLoadConfigMissingFileAppliesDefaults(t *testing.T) {
 	}
 	if cfg.Server.BasePath != "/webhooks" {
 		t.Fatalf("expected default base path, got %q", cfg.Server.BasePath)
+	}
+	if cfg.Server.ShutdownTimeout != 10*time.Second {
+		t.Fatalf("expected default shutdown timeout 10s, got %s", cfg.Server.ShutdownTimeout)
 	}
 	if cfg.Server.AdminReplayMaxLimit != 2000 {
 		t.Fatalf("expected default admin replay max limit 2000, got %d", cfg.Server.AdminReplayMaxLimit)
@@ -327,6 +334,16 @@ server:
 	}
 }
 
+func TestConfigValidateRejectsNonPositiveShutdownTimeout(t *testing.T) {
+	cfg := Config{}
+	cfg.ApplyDefaults()
+	cfg.Server.ShutdownTimeout = 0
+
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "server.shutdown_timeout") {
+		t.Fatalf("expected shutdown timeout validation error, got %v", err)
+	}
+}
+
 func TestLoadConfigVaultReferenceRequiresAddress(t *testing.T) {
 	t.Setenv("VAULT_ADDR", "")
 
@@ -417,6 +434,7 @@ func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
 	t.Setenv("TAP_NATS_SECURE", "true")
 	t.Setenv("TAP_NATS_CA_FILE", "/var/run/secrets/nats/ca.crt")
 	t.Setenv("TAP_SERVER_MAX_BODY_SIZE", "2097152")
+	t.Setenv("TAP_SERVER_SHUTDOWN_TIMEOUT", "11s")
 	t.Setenv("TAP_SERVER_ADMIN_REPLAY_MAX_LIMIT", "1234")
 	t.Setenv("TAP_SERVER_ADMIN_REPLAY_JOB_TTL", "12h")
 	t.Setenv("TAP_SERVER_ADMIN_REPLAY_JOB_MAX_JOBS", "777")
@@ -480,6 +498,9 @@ func TestLoadConfigSnakeCaseEnvOverrides(t *testing.T) {
 	}
 	if cfg.Server.MaxBodySize != 2097152 {
 		t.Fatalf("expected server.max_body_size override, got %d", cfg.Server.MaxBodySize)
+	}
+	if cfg.Server.ShutdownTimeout != 11*time.Second {
+		t.Fatalf("expected server.shutdown_timeout override, got %s", cfg.Server.ShutdownTimeout)
 	}
 	if cfg.Server.AdminReplayMaxLimit != 1234 {
 		t.Fatalf("expected server.admin_replay_max_limit override, got %d", cfg.Server.AdminReplayMaxLimit)

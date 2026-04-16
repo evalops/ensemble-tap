@@ -160,6 +160,7 @@ When any admin token is configured (`server.admin_token`, `server.admin_token_se
   - Replay is capped by `server.admin_replay_max_limit` (default `2000`, valid range `1..100000`); accepted response includes replay job metadata (`job_id`, `status`, `effective_limit`, `max_limit`, `capped`, `dry_run`).
   - Replay job metadata retention/capacity is configurable (`server.admin_replay_job_ttl`, `server.admin_replay_job_max_jobs`), and backend is configurable (`server.admin_replay_store_backend=memory|sqlite`, `server.admin_replay_sqlite_path`).
   - Replay execution is configurable (`server.admin_replay_job_timeout`, `server.admin_replay_max_concurrent_jobs`) for bounded runtime and concurrency.
+  - HTTP shutdown grace is configurable via `server.shutdown_timeout` for slower drains in production.
   - Queue fan-out safety rails are configurable (`server.admin_replay_max_queued_per_ip`, `server.admin_replay_max_queued_per_token`) and return `409` when exceeded.
 - `GET /admin/replay-dlq`
   - Requires header `X-Admin-Token` with read permission (`admin_token`/`admin_token_secondary`/`admin_token_read`/`admin_token_replay`/`admin_token_cancel`).

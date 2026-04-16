@@ -230,6 +230,7 @@ config:
     base_path: /webhooks
     read_timeout: 10s
     write_timeout: 5s
+    shutdown_timeout: 10s
     max_body_size: 1048576
     admin_token: ${TAP_ADMIN_TOKEN}
     admin_token_secondary: ${TAP_ADMIN_TOKEN_SECONDARY}

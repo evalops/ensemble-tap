@@ -190,6 +190,7 @@ type ServerConfig struct {
 	BasePath                  string        `koanf:"base_path"`
 	ReadTimeout               time.Duration `koanf:"read_timeout"`
 	WriteTimeout              time.Duration `koanf:"write_timeout"`
+	ShutdownTimeout           time.Duration `koanf:"shutdown_timeout"`
 	MaxBodySize               int64         `koanf:"max_body_size"`
 	AdminToken                string        `koanf:"admin_token"`
 	AdminTokenSecondary       string        `koanf:"admin_token_secondary"`
@@ -339,6 +340,9 @@ func (c *Config) ApplyDefaults() {
 	if c.Server.WriteTimeout == 0 {
 		c.Server.WriteTimeout = 5 * time.Second
 	}
+	if c.Server.ShutdownTimeout == 0 {
+		c.Server.ShutdownTimeout = 10 * time.Second
+	}
 	if c.Server.MaxBodySize == 0 {
 		c.Server.MaxBodySize = 1 << 20
 	}
@@ -419,6 +423,9 @@ func (c Config) Validate() error {
 	}
 	if c.Server.AdminReplayMaxLimit <= 0 || c.Server.AdminReplayMaxLimit > maxAdminReplayMaxLimit {
 		return fmt.Errorf("server.admin_replay_max_limit must be in range 1..%d", maxAdminReplayMaxLimit)
+	}
+	if c.Server.ShutdownTimeout <= 0 {
+		return fmt.Errorf("server.shutdown_timeout must be greater than 0")
 	}
 	if c.Server.AdminReplayJobTTL <= 0 {
 		return fmt.Errorf("server.admin_replay_job_ttl must be greater than 0")
