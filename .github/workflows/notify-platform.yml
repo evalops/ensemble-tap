@@ -13,8 +13,13 @@ jobs:
     steps:
       - name: Dispatch sync to platform
         env:
-          GH_TOKEN: ${{ secrets.ADMIN_CONTROL_PLANE_SYNC_TOKEN || secrets.GH_BOT_TOKEN || secrets.PAT || github.token }}
+          GH_TOKEN: ${{ secrets.ADMIN_CONTROL_PLANE_SYNC_TOKEN || secrets.GH_BOT_TOKEN || secrets.PAT }}
         run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::Set ADMIN_CONTROL_PLANE_SYNC_TOKEN, GH_BOT_TOKEN, or PAT to dispatch to evalops/platform."
+            exit 1
+          fi
+
           service="${GITHUB_REPOSITORY#*/}"
           gh api repos/evalops/platform/dispatches \
             -X POST \
